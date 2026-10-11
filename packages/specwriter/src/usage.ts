@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { atomicWrite, json, readJson, safePath } from './files.js';
 
 export interface ModelUsage {
@@ -18,6 +18,19 @@ export interface UsageRecord {
 export interface Prices {
   currency: string;
   models: { model: string; kind: 'completion' | 'embedding'; inputPerMillion: number; outputPerMillion?: number }[];
+}
+export interface UsageBudget {
+  schemaVersion: 1; maxRequestsPerOperation?: number; maxObservedTokens?: number; maxEstimatedCost?: number;
+  prices?: Prices; unknownUsage: 'block' | 'allow';
+}
+export function validateBudget(value: unknown): asserts value is UsageBudget {
+  const b = value as UsageBudget;
+  if (!b || b.schemaVersion !== 1 || !['block', 'allow'].includes(b.unknownUsage)
+    || Object.keys(b).some(key => !['schemaVersion', 'maxRequestsPerOperation', 'maxObservedTokens', 'maxEstimatedCost', 'prices', 'unknownUsage'].includes(key))) throw new Error('Invalid usage budget');
+  for (const field of ['maxRequestsPerOperation', 'maxObservedTokens'] as const) if (b[field] !== undefined && (!Number.isSafeInteger(b[field]) || b[field]! < 0)) throw new Error(`${field} must be a nonnegative integer`);
+  if (b.maxEstimatedCost !== undefined && (!Number.isFinite(b.maxEstimatedCost) || b.maxEstimatedCost < 0 || !b.prices)) throw new Error('maxEstimatedCost requires a nonnegative number and model prices');
+  if (b.prices) validatePrices(b.prices);
+  if (b.maxRequestsPerOperation === undefined && b.maxObservedTokens === undefined && b.maxEstimatedCost === undefined) throw new Error('Configure at least one usage limit');
 }
 export function validatePrices(value: unknown): asserts value is Prices {
   const p = value as Prices;
@@ -97,6 +110,66 @@ export function parseRequestMetrics(path: string, successfulProcess: boolean): P
 export class UsageLedger {
   constructor(readonly root: string) {}
   private path(...parts: string[]) { return safePath(this.root, '.specwriter', 'graphrag', 'usage', ...parts); }
+  private budgetPath() { return safePath(this.root, 'specwriter', 'memory-budget.json'); }
+  budget(): UsageBudget | undefined {
+    if (!existsSync(this.budgetPath())) return undefined;
+    let value: unknown;
+    try { value = JSON.parse(readFileSync(this.budgetPath(), 'utf8')); } catch { throw new Error('Invalid memory-budget.json; fix it or run memory budget clear'); }
+    validateBudget(value); return value;
+  }
+  configureBudget(value: UsageBudget | null) {
+    if (value) validateBudget(value);
+    if (existsSync(this.path('budget.lock'))) throw new Error('A budget-controlled operation is active; finish or recover it before changing the budget');
+    if (value) atomicWrite(this.budgetPath(), json(value)); else rmSync(this.budgetPath(), { force: true });
+    return this.budgetStatus();
+  }
+  budgetStatus() {
+    const budget = this.budget();
+    const report = this.report(budget?.prices);
+    const observedPaidTokens = report.operations.reduce((sum, record) => sum + record.models.filter(model => !model.local).reduce((s, m) => s + m.inputTokens + m.outputTokens, 0), 0);
+    const knownCost = report.operations.reduce((sum, record) => sum + (record.estimatedCost ?? 0), 0);
+    const unknownCost = report.operations.filter(record => record.estimatedCost === null).length;
+    let blocked: string | null = null;
+    if (budget) {
+      if (budget.maxRequestsPerOperation === 0) blocked = 'New model requests are disabled by the request limit';
+      if (budget.maxObservedTokens !== undefined && observedPaidTokens >= budget.maxObservedTokens) blocked = 'Observed paid-token threshold reached';
+      if (budget.maxEstimatedCost !== undefined && knownCost >= budget.maxEstimatedCost) blocked = 'Estimated-cost threshold reached';
+      if (budget.unknownUsage === 'block' && ((budget.maxObservedTokens !== undefined && report.incompleteOperations > 0) || (budget.maxEstimatedCost !== undefined && unknownCost > 0))) blocked = 'Previous usage/cost is incomplete; reconcile it or explicitly configure --unknown-usage allow';
+    }
+    return { enabled: !!budget, budget: budget ?? null, observedPaidTokens, knownEstimatedCost: knownCost, unknownCostOperations: unknownCost,
+      incompleteOperations: report.incompleteOperations, blocked, busy: existsSync(this.path('budget.lock')),
+      note: 'GraphRAG only. Request limit counts noncached model attempts per index/update/query; token/cost thresholds stop subsequent requests after responses. In-flight requests may overshoot; Codex and diagnostic probes are excluded.' };
+  }
+  recoverBudget() {
+    const lock = this.path('budget.lock');
+    if (!existsSync(lock)) return { recovered: false };
+    let owner: { pid: number; childPid?: number };
+    try { owner = JSON.parse(readFileSync(lock, 'utf8')); } catch { throw new Error('Invalid budget lock; inspect it manually'); }
+    for (const pid of [owner.pid, ...(owner.childPid === undefined ? [] : [owner.childPid])]) {
+      if (!Number.isSafeInteger(pid) || pid < 1) throw new Error('Invalid budget lock PID; inspect it manually');
+      try { process.kill(pid, 0); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ESRCH') continue;
+        throw new Error('Cannot confirm budget process stopped');
+      }
+      throw new Error('Budget owner or worker is still running; do not recover its lock');
+    }
+    rmSync(lock); return { recovered: true };
+  }
+  /** Serialize book operations while thresholds are active; independent snapshots share the same budget. */
+  acquireBudget() {
+    if (!this.budget()) return undefined;
+    mkdirSync(this.path(), { recursive: true });
+    const lock = this.path('budget.lock');
+    try { writeFileSync(lock, json({ pid: process.pid, startedAt: new Date().toISOString() }), { flag: 'wx' }); }
+    catch { throw new Error('Book usage budget is busy; run memory budget recover only after its process stops'); }
+    try {
+      const status = this.budgetStatus();
+      if (status.blocked) throw new Error(`GraphRAG budget stopped the operation: ${status.blocked}`);
+      return { guard: { ...status.budget!, initialTokens: status.observedPaidTokens, initialCost: status.knownEstimatedCost },
+        onSpawn: (childPid: number) => atomicWrite(lock, json({ pid: process.pid, childPid, startedAt: new Date().toISOString() })),
+        release: () => rmSync(lock, { force: true }) };
+    } catch (error) { rmSync(lock, { force: true }); throw error; }
+  }
   start(snapshotRoot: string, operation: UsageRecord['operation']) {
     const manifest = readJson<{ snapshotId: string; atChapter: number }>(safePath(snapshotRoot, 'manifest.json'));
     const id = randomUUID();

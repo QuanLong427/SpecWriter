@@ -6,6 +6,7 @@
 node .specwriter/bin/specwriter.mjs version init
 node .specwriter/bin/specwriter.mjs version save --message "卷一完成"
 node .specwriter/bin/specwriter.mjs version log
+node .specwriter/bin/specwriter.mjs version status
 node .specwriter/bin/specwriter.mjs version bundle --out E:\backups\book-20261011.bundle
 node .specwriter/bin/specwriter.mjs version restore HEAD --to E:\novels\recovered
 node .specwriter/bin/specwriter.mjs version restore HEAD --bundle E:\backups\book-20261011.bundle --to E:\novels\migrated
@@ -20,6 +21,10 @@ node .specwriter/bin/specwriter.mjs version restore HEAD --bundle E:\backups\boo
 `.env`、常见 credentials/secrets 文件、配置中已知的密钥值、模型权重、GraphRAG 索引/缓存/日志、生成的 exports 不进入检查点。模型名称及 provider 名称只用于恢复提示；API Key、端点和 Python 路径在新机器配置。不要把其他秘密粘入正文或 Spec；检查点和 bundle 包含未发表小说及历史草稿，不加密。
 
 数据库接纳与 Git 保存是两个阶段。`versionNeedsSave=true` 表示章节已经接纳，Git 保存失败；修复后 version save，不能重复 commit 当作补救。投影失败先 sync 再保存。残留 operation.lock 的 PID 必须确认已经停止后再人工移除；不要删除正在操作的锁。
+
+v0.7 的 `status.backup` / `version status` 对比真实 Git HEAD 的文件哈希与数据库 generation/工作包状态，列出待备份文件、记忆变化和最后检查点。外部编辑的 Spec、计划、批注、草稿和阅读偏好也会被发现，不要求作者必须从 CLI 修改。保存失败写入不含密钥的通用失败记录，重启后仍显示，成功 save 后清除。无法读取 Git/检查点时 needsSave=null 并提供 error，不伪报为已备份。独立作者修改不会自动创建检查点，需手工 version save。
+
+预算配置和已整理的数值用量记录（usage/operations）随书备份，原始 metrics、日志和索引仍排除。恢复旧检查点不会撤销供应商已发生费用，检查点之后的用量需根据账单补计或调整剩余额度；迁移最新检查点保留当时累计用量。
 
 restore 只接受 HEAD 或提交哈希，目标必须是原小说之外的新目录。逐文件核对哈希、字节数、路径，检查数据库完整性、书籍 ID、generation 和正式正文一致性；完成验证和独立 Git 克隆之后才发布目标目录。原小说和历史保留；恢复旧提交时另存源历史末端引用，后续 bundle 仍包含较新的检查点。
 

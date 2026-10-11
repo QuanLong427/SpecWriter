@@ -14,10 +14,13 @@ interface Snapshot {
   schemaVersion: 1; bookId: string; generation: number; createdAt: string;
   files: { path: string; hash: string; bytes: number }[];
   runtime: { graphrag?: string; models: { kind: string; model: string; provider: string }[] };
+  stateHash?: string;
 }
+const authorRoots = ['specwriter', 'manuscript', '.agents/skills', 'AGENTS.md', '.specwriter/reader/preferences.json', '.specwriter/installation.json', '.specwriter/projection.json', '.specwriter/graphrag/usage/operations'];
 const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 const backupDb = '.specwriter/backup/writer.db', manifestFile = '.specwriter/backup/manifest.json';
 const allowed = (path: string) => ['AGENTS.md', '.specwriter/reader/preferences.json', '.specwriter/installation.json', '.specwriter/projection.json', backupDb].includes(path)
+  || /^\.specwriter\/graphrag\/usage\/operations\/[a-f0-9-]+\.json$/.test(path)
   || ['specwriter/', 'manuscript/', '.agents/skills/'].some(prefix => path.startsWith(prefix));
 const privateName = (name: string) => /^\.env(?:\.|$)/i.test(name) || /^(credentials|secrets)(?:\.|$)/i.test(name);
 const portablePath = (path: string) => !path.includes('\\') && path.split('/').every(part =>
@@ -70,6 +73,49 @@ export class BookVersions {
       const [commit, at, ...message] = line.split('\t'); return { commit, at, message: message.join('\t') };
     });
   }
+  /** Compare author files against the actual Git HEAD, including edits made outside the CLI. */
+  status(project: Project) {
+    const config = loadConfig(this.root).versioning;
+    const result = { enabled: config?.enabled ?? false, autoSave: config?.autoSave ?? false,
+      repositoryExists: existsSync(this.repo()), needsSave: true as boolean | null,
+      lastCheckpoint: null as { commit: string; at: string; generation: number } | null,
+      changedFiles: [] as string[], memoryChanged: false, error: null as string | null,
+      lastFailure: null as { at: string; message: string } | null };
+    const failure = this.path('last-failure.json');
+    if (existsSync(failure)) try { result.lastFailure = JSON.parse(readFileSync(failure, 'utf8')); }
+    catch { result.error = 'Cannot read the previous backup failure; run version save to refresh'; }
+    if (!result.enabled && !result.repositoryExists) { result.needsSave = null; return result; }
+    try {
+      if (!result.repositoryExists) throw new Error('Versioning is enabled but its repository is missing; run version init');
+      const commit = this.head();
+      if (!commit) throw new Error('No readable checkpoint; run version save or check Git installation');
+      const manifest = JSON.parse(this.git(['show', `${commit}:${manifestFile}`])) as Snapshot;
+      if (manifest.schemaVersion !== 1 || manifest.bookId !== (loadConfig(this.root).bookId ?? '') || !Array.isArray(manifest.files)) throw new Error('Invalid checkpoint metadata; inspect the book version repository');
+      result.lastCheckpoint = { commit, at: manifest.createdAt, generation: manifest.generation };
+      result.memoryChanged = manifest.generation !== project.store.generation()
+        || (manifest.stateHash !== undefined && manifest.stateHash !== this.stateHash(project));
+      const previous = new Map(manifest.files.filter(file => file.path !== backupDb).map(file => [file.path, file.hash]));
+      const current = new Map<string, string>();
+      const walk = (relative: string) => {
+        const source = safePath(this.root, relative);
+        if (!existsSync(source) || privateName(relative.split('/').at(-1)!)) return;
+        const stat = lstatSync(source);
+        if (stat.isSymbolicLink()) throw new Error('Linked author files prevent backup comparison');
+        if (stat.isDirectory()) for (const entry of readdirSync(source)) {
+          if (entry === '.git') throw new Error('Nested author repositories prevent backup comparison');
+          walk(`${relative}/${entry}`);
+        }
+        else if (stat.isFile() && allowed(relative)) current.set(relative, sha(readFileSync(source)));
+      };
+      for (const path of authorRoots) walk(path);
+      result.changedFiles = [...new Set([...previous.keys(), ...current.keys()])].filter(path => previous.get(path) !== current.get(path)).sort();
+      result.needsSave = result.memoryChanged || result.changedFiles.length > 0;
+    } catch (error) { result.needsSave = null; result.error = (error as Error).message; }
+    return result;
+  }
+  private stateHash(project: Project) {
+    return sha(Buffer.from(json({ generation: project.store.generation(), works: project.store.works() })));
+  }
   private secrets(): string[] {
     const values: string[] = [];
     for (const path of [safePath(this.root, '.env'), safePath(this.root, '.specwriter/graphrag/provider/.env')]) if (existsSync(path)) {
@@ -83,6 +129,18 @@ export class BookVersions {
     return values;
   }
   save(project: Project, message = '保存小说检查点') {
+    try {
+      const result = this.saveCheckpoint(project, message);
+      rmSync(this.path('last-failure.json'), { force: true });
+      return result;
+    } catch (error) {
+      // Persist a generic reason: author-controlled messages and credentials never enter this file.
+      try { atomicWrite(this.path('last-failure.json'), json({ at: new Date().toISOString(),
+        message: 'Checkpoint failed; run version save after checking synchronization, Git and credential-free author files' })); } catch { /* status still compares against HEAD */ }
+      throw error;
+    }
+  }
+  private saveCheckpoint(project: Project, message: string) {
     if (resolve(project.root) !== this.root) throw new Error('Checkpoint project identity mismatch');
     if (!message.trim() || message.length > 500 || /[\r\n\0]/.test(message)) throw new Error('Checkpoint message must be a single nonempty line up to 500 characters');
     if (!existsSync(this.repo())) throw new Error('Run version init first');
@@ -96,8 +154,12 @@ export class BookVersions {
         if (project.store.db.isTransaction) throw new Error('Cannot checkpoint inside a database transaction');
         project.store.db.prepare('VACUUM INTO ?').run(db);
         const copied = new DatabaseSync(db, { readOnly: true });
-        let generation: number;
-        try { generation = Number((copied.prepare("SELECT value FROM meta WHERE key = 'generation'").get() as { value: string }).value); }
+        let generation: number, stateHash: string;
+        try {
+          generation = Number((copied.prepare("SELECT value FROM meta WHERE key = 'generation'").get() as { value: string }).value);
+          const works = copied.prepare('SELECT id, title, from_chapter AS fromChapter, to_chapter AS toChapter, status FROM work ORDER BY id').all();
+          stateHash = sha(Buffer.from(json({ generation, works })));
+        }
         finally { copied.close(); }
         const files: Snapshot['files'] = [], secrets = this.secrets();
         const authorFiles = new Map<string, string>();
@@ -120,8 +182,8 @@ export class BookVersions {
           else if (stat.isFile() && allowed(relative)) capture(relative, readFileSync(source));
         };
         project.store.transaction(() => {
-          if (project.store.generation() !== generation) throw new Error('Book changed while copying its database; retry checkpoint');
-          for (const path of ['specwriter', 'manuscript', '.agents/skills', 'AGENTS.md', '.specwriter/reader/preferences.json', '.specwriter/installation.json', '.specwriter/projection.json']) walk(path);
+          if (this.stateHash(project) !== stateHash) throw new Error('Book changed while copying its database; retry checkpoint');
+          for (const path of authorRoots) walk(path);
           for (const [path, digest] of authorFiles) if (!existsSync(safePath(this.root, path)) || sha(readFileSync(safePath(this.root, path))) !== digest) throw new Error('Author documents changed during checkpoint; retry after edits finish');
         });
         capture(backupDb, readFileSync(db));
@@ -135,7 +197,7 @@ export class BookVersions {
           const provider = safePath(this.root, '.specwriter/graphrag/provider.json');
           if (existsSync(provider)) runtime.graphrag = JSON.parse(readFileSync(provider, 'utf8')).version;
         }
-        const manifest: Snapshot = { schemaVersion: 1, bookId: loadConfig(stage).bookId ?? '', generation, createdAt: new Date().toISOString(), files: files.sort((a,b) => a.path.localeCompare(b.path)), runtime };
+        const manifest: Snapshot = { schemaVersion: 1, bookId: loadConfig(stage).bookId ?? '', generation, stateHash, createdAt: new Date().toISOString(), files: files.sort((a,b) => a.path.localeCompare(b.path)), runtime };
         if (secrets.some(secret => json(manifest).includes(secret))) throw new Error('Configured credential found in checkpoint metadata');
         atomicWrite(safePath(stage, manifestFile), json(manifest));
         // Preserve exact prose bytes across OSes and prevent external clean filters.

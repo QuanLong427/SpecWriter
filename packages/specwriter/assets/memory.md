@@ -152,6 +152,14 @@ TypeScript 集成使用 `new WriterMemory(project).prepare/query`，两者为异
 
 ## 用量与实验
 
+v0.7 支持 `memory graphrag setup --python EXE --credentials FILE --preset qwen-bge-m3` 简化配置：Qwen 凭据由既有 .env 读取，embedding 为本机 Ollama 的 bge-m3、1024 维。手工 embedding 参数不能与预设混用，已有配置加 --reconfigure。推荐 --credentials，避免部分 Node 版本抢先解析 --env-file。Ollama/Python 的安装仍由用户或 Codex 按环境完成。
+
+`doctor --models` 或 `memory graphrag diagnose` 检查 Python 与模型配置，不调用模型；显式 --probe 才逐模型发送小请求并核对 embedding 维度。configured 与 ready 分开显示；探测用量单独返回，不计入 GraphRAG 作业账本。
+
+`memory budget configure --max-requests 100 --max-tokens 500000` 配置每个 index/update/query 的非缓存调用尝试上限和本书累计观测付费 token 阈值。`--max-cost 10 --prices FILE` 可配置金额阈值；model 价格名称使用 memory usage 的完整标识，如 openai/qwen-model，currency 决定金额单位。配置命令替换全部限制。缓存不消耗新额度，本地 BGE 不计付费 token；请求次数仍包含本地 embedding。未知用量默认阻止后续 token/金额受限调用，不能把未统计费用当作零。
+
+阈值在响应后更新，已在途请求可能超出；底层网络重试不由中间件调用尝试计数证明。`memory budget show` 查看原因，recover 仅解除已停止主/子进程的锁，clear 关闭限制。不得为了自动续写绕过作者配置的预算。金额缺少当前模型价格时在调用前停止。同书受限作业串行运行；预算配置与数值账本随 Git 检查点保存，但旧检查点之后的费用须另行核对。Codex 写作、诊断探测、本地硬件费用均不包括在此阈值内。
+
 `memory usage [--prices FILE]` 查看升级后记录的 GraphRAG 请求用量；索引/查询/缓存复用分开记录，completion 与 embedding 分开统计。GraphRAG 本地缓存重放的历史 usage 不计新消耗；失败、缺失用量与重试保留未知，不当作零费用。该报表不包括 Codex 写作、提取和审稿。`benchmark run` 在独立实验目录进行全量、缓存、增量和结构化检索对照，默认离线；真实调用与人工评分见 [实验说明](benchmark.md)。
 
 本版固定指标处理器为官方 default/memory，关闭官方聚合日志写入，使用版本绑定 observer 记录逐请求数值。该设置改变索引配置哈希；已有索引若提示配置过期，应按提示使用 `memory graphrag index --at N --rebuild`，可能产生模型调用。正文与正式记忆不会被修改。

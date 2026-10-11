@@ -1,6 +1,6 @@
 {
   "name": "specwriter",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Local spec writing workflows and evidence-backed WriterMemory for Codex",
   "type": "module",
   "license": "MIT",
@@ -8,7 +8,7 @@
   "bin": { "specwriter": "dist/cli.js" },
   "exports": { ".": "./dist/index.js" },
   "types": "./dist/index.d.ts",
-  "files": ["dist", "assets", "schemas", "licenses", "requirements-graphrag.txt", "THIRD_PARTY_NOTICES.md", "README.md", "LICENSE.txt"],
+  "files": ["dist", "assets", "schemas", "licenses", "requirements-graphrag.txt", "THIRD_PARTY_NOTICES.md", "README.md", "install.md", ".env.example", "LICENSE.txt"],
   "scripts": {
     "build": "tsc",
     "check": "tsc --noEmit",

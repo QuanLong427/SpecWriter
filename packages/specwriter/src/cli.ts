@@ -13,7 +13,7 @@ import { readJson } from './files.js';
 import { BookVersions } from './versions.js';
 import { runBenchmark, scoreBenchmark, type BenchmarkArm } from './benchmark.js';
 
-const help = `SpecWriter 0.6 — Codex fiction workflows + WriterMemory + local novel reader
+const help = `SpecWriter 0.7 — Codex fiction workflows + WriterMemory + local novel reader
 
 Usage: specwriter <command> [arguments] [--root PATH] [--json]
 
@@ -39,6 +39,10 @@ Usage: specwriter <command> [arguments] [--root PATH] [--json]
                                 Export the chapter-bounded provenance graph as JSON
   memory rebuild                Rebuild derived full-text and graph indexes
   memory usage [--prices FILE]   Report observed GraphRAG tokens, cache hits and optional cost
+  memory budget show|clear|recover
+  memory budget configure [--max-requests N --max-tokens N --max-cost N --prices FILE]
+                [--unknown-usage block|allow]
+                                Limit new requests and stop after observed book usage reaches thresholds
   benchmark run [--mode offline|live] [--dataset FILE] [--out NEW_DIR]
                 [--provider BOOK_ROOT --max-operations N] [--arms cold,warm,incremental,structural]
                 [--budget CHARS] [--method local|global|drift|basic]
@@ -47,9 +51,12 @@ Usage: specwriter <command> [arguments] [--root PATH] [--json]
                                 Aggregate version-bound human ratings and usage
   memory graphrag export [--at N]
                                 Export an immutable accepted-prose prefix (no model)
-  memory graphrag setup --python EXE --embedding MODEL [--model MODEL | --env-file FILE]
+  memory graphrag setup --python EXE --embedding MODEL [--model MODEL | --credentials FILE]
                 [--provider NAME --embedding-base URL --embedding-dimensions N --reconfigure]
+                [--preset qwen-bge-m3]
                                 Initialize the default Microsoft GraphRAG 3.3.x provider
+  memory graphrag diagnose [--probe]
+                                Check Python/models; --probe sends small, potentially paid requests
   memory graphrag index [--at N] [--rebuild]
                                 Incrementally extend a verified prefix; rebuild changed configuration
   memory graphrag status [--at N]
@@ -64,12 +71,13 @@ Usage: specwriter <command> [arguments] [--root PATH] [--json]
   version init                  Enable independent local Git checkpoints and auto-save
   version save [--message TEXT]  Save prose/specs/reviews and a consistent memory DB copy
   version log                   List up to 50 checkpoints
+  version status                Inspect pending backup edits and the last backup failure
   version bundle --out NEW_FILE Export complete Git history for backup/migration
   version restore HASH --to NEW_DIR [--bundle FILE]
                                 Restore and verify a new book directory; never overwrite
   archive ID                    Close completed work without promoting plans to facts
   sync [--capture]              Rebuild projections; preserve direct edits as drafts
-  doctor                        Check database, provenance and projected files
+  doctor [--models --probe]      Check book health; --models checks provider, --probe calls models
   read [--draft --work ID] [--port N] [--no-open]
                                 Open the local novel reader; Ctrl+C stops its server
   export [--format txt|md|html]   Export only reconciled accepted chapters to exports/
@@ -87,7 +95,7 @@ interface Arguments { positional: string[]; flags: Map<string, string | boolean>
 function parseArguments(values: string[]): Arguments {
   const positional: string[] = [];
   const flags = new Map<string, string | boolean>();
-  const booleans = new Set(['json', 'help', 'refresh', 'capture', 'draft', 'no-open', 'reopen', 'rebuild', 'dry-run', 'reconfigure']);
+  const booleans = new Set(['json', 'help', 'refresh', 'capture', 'draft', 'no-open', 'reopen', 'rebuild', 'dry-run', 'reconfigure', 'models', 'probe']);
   for (let index = 0; index < values.length; index++) {
     const value = values[index]!;
     if (!value.startsWith('--')) { positional.push(value); continue; }
@@ -108,7 +116,7 @@ async function main(): Promise<void> {
   if (!command || command === 'help' || args.flags.has('help')) { process.stdout.write(help); return; }
   const allowed: Record<string, string[]> = {
     init: ['name', 'backend'], status: [], propose: ['title', 'from', 'to'], prepare: ['work', 'query', 'budget', 'refresh'],
-    hash: ['work'], verify: ['work'], commit: ['work'], memory: ['at', 'holder', 'limit', 'hops', 'python', 'model', 'embedding', 'env-file', 'provider', 'embedding-base', 'embedding-dimensions', 'reconfigure', 'method', 'backend', 'auto-index', 'retain', 'keep', 'rebuild', 'dry-run', 'prices'], history: [], archive: [], sync: ['capture'], doctor: [],
+    hash: ['work'], verify: ['work'], commit: ['work'], memory: ['at', 'holder', 'limit', 'hops', 'python', 'model', 'embedding', 'env-file', 'credentials', 'provider', 'embedding-base', 'embedding-dimensions', 'reconfigure', 'preset', 'probe', 'method', 'backend', 'auto-index', 'retain', 'keep', 'rebuild', 'dry-run', 'prices', 'max-requests', 'max-tokens', 'max-cost', 'unknown-usage'], history: [], archive: [], sync: ['capture'], doctor: ['models', 'probe'],
     'review-requirements': ['work'], version: ['message', 'to', 'bundle', 'out'],
     benchmark: ['mode', 'dataset', 'out', 'provider', 'max-operations', 'arms', 'budget', 'method', 'run', 'ratings', 'prices'],
     read: ['draft', 'work', 'port', 'no-open'], export: ['format'], feedback: ['chapter', 'work', 'reopen']
@@ -156,7 +164,7 @@ async function main(): Promise<void> {
   }
   if (command === 'version') {
     count(2); const action = position(0, 'version action');
-    const flags: Record<string, string[]> = { init: [], save: ['message'], log: [], bundle: ['out'], restore: ['to', 'bundle'] };
+    const flags: Record<string, string[]> = { init: [], save: ['message'], log: [], status: [], bundle: ['out'], restore: ['to', 'bundle'] };
     if (!flags[action]) throw new Error('Version action must be init, save, log, bundle or restore');
     for (const flag of args.flags.keys()) if (!['root', 'json', ...flags[action]!].includes(flag)) throw new Error(`Unsupported option --${flag} for version ${action}`);
     if (action !== 'restore' && args.positional.length > 1) throw new Error('Too many positional arguments');
@@ -166,7 +174,7 @@ async function main(): Promise<void> {
     if (action === 'log') { print(versions.log()); return; }
     if (action === 'bundle') { print(versions.bundle(option('out', true)!)); return; }
     const book = new Project(root);
-    try { print(action === 'init' ? versions.init(book) : versions.save(book, option('message'))); }
+    try { print(action === 'init' ? versions.init(book) : action === 'status' ? versions.status(book) : versions.save(book, option('message'))); }
     finally { book.close(); }
     return;
   }
@@ -187,7 +195,14 @@ async function main(): Promise<void> {
       case 'history': count(1); print(project.store.history(positiveInteger(position(0, 'chapter'), 'chapter'))); break;
       case 'archive': count(1); print(project.archive(position(0, 'work id'))); break;
       case 'sync': count(0); print(project.sync({ capture: args.flags.has('capture') })); break;
-      case 'doctor': { count(0); const result = project.doctor(); print(result); if (!result.healthy) process.exitCode = 1; break; }
+      case 'doctor': {
+        count(0); if (args.flags.has('probe') && !args.flags.has('models')) throw new Error('--probe requires --models');
+        const result = project.doctor();
+        const models = args.flags.has('models') ? await new MicrosoftGraphRag(project).diagnose({ probe: args.flags.has('probe'), signal: controller.signal }) : undefined;
+        print({ ...result, ...(models ? { models } : {}) });
+        if (!result.healthy || (models && (!models.runtime.ready || !models.configured || (args.flags.has('probe') && !models.ready)))) process.exitCode = 1;
+        break;
+      }
       case 'export': count(0); print(new NovelReader(project).writeExport((option('format') ?? 'txt') as 'txt' | 'md' | 'html')); break;
       case 'read': {
         count(0);
@@ -230,8 +245,8 @@ async function main(): Promise<void> {
       }
       case 'memory': {
         const subcommand = position(0, 'memory subcommand');
-        if (option('prices') && subcommand !== 'usage') throw new Error('--prices applies only to memory usage');
-        const memoryFlags: Record<string, string[]> = { show: ['at'], usage: ['prices'], rebuild: [], graph: ['at', 'holder'], configure: ['backend', 'method', 'auto-index', 'retain'], query: ['at', 'holder', 'limit', 'hops', 'backend', 'method'] };
+        if (option('prices') && !['usage', 'budget'].includes(subcommand)) throw new Error('--prices applies only to memory usage/budget');
+        const memoryFlags: Record<string, string[]> = { show: ['at'], usage: ['prices'], budget: ['prices', 'max-requests', 'max-tokens', 'max-cost', 'unknown-usage'], rebuild: [], graph: ['at', 'holder'], configure: ['backend', 'method', 'auto-index', 'retain'], query: ['at', 'holder', 'limit', 'hops', 'backend', 'method'] };
         if (subcommand !== 'graphrag') {
           if (!memoryFlags[subcommand]) throw new Error('Unknown memory subcommand');
           for (const flag of args.flags.keys()) if (!['root', 'json', ...memoryFlags[subcommand]!].includes(flag)) throw new Error(`Unsupported option --${flag} for memory ${subcommand}`);
@@ -245,6 +260,17 @@ async function main(): Promise<void> {
         else if (subcommand === 'usage') {
           count(1);
           print(new UsageLedger(project.root).report(prices()));
+        }
+        else if (subcommand === 'budget') {
+          count(2); const ledger = new UsageLedger(project.root), action = position(1, 'budget action');
+          if (action !== 'configure' && [...args.flags.keys()].some(flag => !['root', 'json'].includes(flag))) throw new Error('Budget options apply only to configure');
+          const numeric = (flag: string) => option(flag) === undefined ? undefined : Number(option(flag));
+          if (action === 'show') print(ledger.budgetStatus());
+          else if (action === 'clear') print(ledger.configureBudget(null));
+          else if (action === 'recover') print(ledger.recoverBudget());
+          else if (action === 'configure') print(ledger.configureBudget({ schemaVersion: 1, maxRequestsPerOperation: numeric('max-requests'), maxObservedTokens: numeric('max-tokens'),
+            maxEstimatedCost: numeric('max-cost'), prices: prices(), unknownUsage: (option('unknown-usage') ?? 'block') as 'block' | 'allow' }));
+          else throw new Error('Budget action must be show, configure, clear or recover');
         }
         else if (subcommand === 'rebuild') { count(1); print(project.rebuildSearch()); }
         else if (subcommand === 'graph') { count(1); print(project.graph(at, option('holder'))); }
@@ -260,13 +286,23 @@ async function main(): Promise<void> {
           if (option('holder') || option('hops') || option('limit')) throw new Error('Microsoft GraphRAG returns author-level advisory answers; --holder, --hops and --limit apply only to local memory query');
           const provider = new MicrosoftGraphRag(project);
           const action = position(1, 'GraphRAG action');
-          const actionFlags: Record<string, string[]> = { setup: ['python', 'model', 'embedding', 'env-file', 'provider', 'embedding-base', 'embedding-dimensions', 'reconfigure'], index: ['at', 'rebuild'], query: ['at', 'method'], export: ['at'], status: ['at'], recover: ['at'], prune: ['keep', 'dry-run'] };
+          const actionFlags: Record<string, string[]> = { setup: ['python', 'model', 'embedding', 'env-file', 'credentials', 'provider', 'embedding-base', 'embedding-dimensions', 'reconfigure', 'preset'], diagnose: ['probe'], index: ['at', 'rebuild'], query: ['at', 'method'], export: ['at'], status: ['at'], recover: ['at'], prune: ['keep', 'dry-run'] };
           if (!actionFlags[action]) throw new Error('Unknown GraphRAG action');
           for (const flag of args.flags.keys()) if (!['root', 'json', ...actionFlags[action]!].includes(flag)) throw new Error(`Unsupported option --${flag} for GraphRAG ${action}`);
           if (action === 'export') { count(2); print(provider.export(at)); }
-          else if (action === 'setup') { count(2); print(await provider.setup({ python: option('python', true)!, model: option('model'), embedding: option('embedding', true)!,
-            envFile: option('env-file'), provider: option('provider'), embeddingBase: option('embedding-base'),
-            embeddingDimensions: option('embedding-dimensions') === undefined ? undefined : positiveInteger(option('embedding-dimensions'), 'embedding-dimensions'), reconfigure: args.flags.has('reconfigure') })); }
+          else if (action === 'setup') { count(2);
+            const preset = option('preset');
+            if (preset && preset !== 'qwen-bge-m3') throw new Error('Unknown model preset');
+            if (preset && ['embedding', 'embedding-base', 'embedding-dimensions'].some(flag => args.flags.has(flag))) throw new Error('The preset supplies embedding settings; omit explicit embedding options');
+            if (option('env-file') && option('credentials')) throw new Error('Use --credentials or --env-file, not both');
+            const credentials = option('credentials') ?? option('env-file');
+            if (preset && !credentials) throw new Error('--preset qwen-bge-m3 requires --credentials FILE');
+            print(await provider.setup({ python: option('python', true)!, model: option('model'), embedding: preset ? 'bge-m3' : option('embedding', true)!,
+            envFile: credentials, provider: option('provider'), embeddingBase: option('embedding-base'),
+            embeddingDimensions: option('embedding-dimensions') === undefined ? undefined : positiveInteger(option('embedding-dimensions'), 'embedding-dimensions'), reconfigure: args.flags.has('reconfigure'),
+            ...(preset ? { embeddingBase: 'http://127.0.0.1:11434/v1', embeddingDimensions: 1024 } : {}) })); }
+          else if (action === 'diagnose') { count(2); const result = await provider.diagnose({ probe: args.flags.has('probe'), signal: controller.signal }); print(result);
+            if (!result.runtime.ready || !result.configured || (args.flags.has('probe') && !result.ready)) process.exitCode = 1; }
           else if (action === 'index') { count(2); print(await provider.index(at, { ...memoryOptions, rebuild: args.flags.has('rebuild') })); }
           else if (action === 'query') { count(3); print(await provider.query(position(2, 'query text'), { signal: controller.signal, at, method: option('method') as 'local' | 'global' | 'drift' | 'basic' | undefined })); }
           else if (action === 'status') { count(2); print(provider.inspect(at)); }

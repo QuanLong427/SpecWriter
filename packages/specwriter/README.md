@@ -6,6 +6,31 @@
 
 本轮补齐重要边界：关键当前状态唯一性、声明与证据逐项审阅、检索引用状态与正式记忆冲突核对，以及每本小说独立的 Git 检查点和迁移恢复。自动核对覆盖常见明确句式，复杂语义仍由 Codex 审阅。
 
+## v0.7：模型诊断、备份状态和用量限制
+
+在小说目录配置已有 Qwen 凭据与本地 BGE-M3（Ollama 须已安装并启动，执行 `ollama pull bge-m3` 获取模型）：
+
+```powershell
+node .specwriter/bin/specwriter.mjs memory graphrag setup --python E:\projects\MyProjs\SpecWriter\.graphrag-venv\Scripts\python.exe --credentials E:\projects\MyProjs\SpecWriter\.env --preset qwen-bge-m3
+node .specwriter/bin/specwriter.mjs doctor --models
+node .specwriter/bin/specwriter.mjs doctor --models --probe
+node .specwriter/bin/specwriter.mjs version status
+node .specwriter/bin/specwriter.mjs memory budget configure --max-requests 100 --max-tokens 500000
+node .specwriter/bin/specwriter.mjs memory budget show
+```
+
+替换示例 Python 与凭据文件路径。预设使用本机 `http://127.0.0.1:11434/v1` 的 `bge-m3`、1024 维；已有设置需要显式 `--reconfigure`。手工配置仍支持 `--embedding/--embedding-base/--embedding-dimensions`，不能与预设混用。推荐 `--credentials`；兼容旧 `--env-file`，但部分 Node 版本会在运行 CLI 前解析后者。
+
+`doctor --models` 与 `memory graphrag diagnose` 默认不调用模型，`configured=true` 表示配置完整，只有 `--probe` 成功才返回 `ready=true`。探测会产生少量模型用量，单独返回 observedUsage，不进入 GraphRAG 作业账本。失败只显示状态、HTTP 错误码和修复建议，不回显模型正文或密钥。
+
+启用版本管理后，`status.backup` 和 `version status` 持续显示最后检查点、待备份文件、记忆变化与上次失败；独立修改 Spec、计划、批注和阅读偏好后也可发现。失败后运行 `version save` 补存，成功清除失败记录；不重复接纳章节。`needsSave=null` 表示未启用或状态无法确认，查看 enabled/error 区分。
+
+请求上限按每次 index/update/query 的非缓存模型调用尝试计数（含本地 embedding），token 阈值累计本书观测到的付费输入＋输出 token，本地 BGE 不计付费 token。金额阈值使用自行提供的价格，例如 `memory budget configure --max-cost 10 --prices prices.json`；单位是价格文件的 currency。配置命令替换整份限制，要保留多个上限须在同次提供。
+
+费用与 token 在响应后才能确定，达到阈值阻止后续请求，已经在途的请求可能超过阈值；内部网络重试与供应商账单不由该调用计数证明。模型调用上限限制 GraphRAG 中间件调用尝试。未知用量默认阻止继续执行 token/金额限制，核对后可显式 `--unknown-usage allow`，但未知费用不会因此变成零。缺少当前模型价格时，金额限制会在调用前停止。
+
+本书限额作业串行执行，缓存答案与已建索引仍可复用。崩溃后 `memory budget recover` 仅在主进程与记录的子进程都停止时解除锁；`memory budget clear` 关闭限制。预算保存在 `specwriter/memory-budget.json`，已整理的数值用量账本随书备份，原始 metrics、模型配置与索引不保存。恢复旧检查点只恢复当时的用量，检查点之后已经发生的费用不会撤销，须根据账单调整剩余额度。限制不包含 Codex 写作、诊断探测、本地硬件费用，也不是供应商账单硬上限。
+
 ## 小说版本、备份与恢复
 
 在小说目录启用，之后每次接纳成功自动保存检查点：
@@ -14,6 +39,7 @@
 node .specwriter/bin/specwriter.mjs version init
 node .specwriter/bin/specwriter.mjs version save --message "卷一完成"
 node .specwriter/bin/specwriter.mjs version log
+node .specwriter/bin/specwriter.mjs version status
 node .specwriter/bin/specwriter.mjs version bundle --out E:\backups\my-book.bundle
 node .specwriter/bin/specwriter.mjs version restore HEAD --to E:\novels\recovered
 ```
@@ -23,6 +49,8 @@ node .specwriter/bin/specwriter.mjs version restore HEAD --to E:\novels\recovere
 `versionNeedsSave=true` 表示章节已接纳但 Git 检查点未保存，修复后运行 version save；不要重复接纳。旧小说重新运行 init 更新未修改的 Skills 和协议，再 refresh 待写章节。
 
 ## 安装与初始化
+
+可直接将本包的 [install.md](install.md) 交给 Codex 执行完整安装、依赖检查和使用验收；新凭据配置使用 [.env.example](.env.example)，已有 .env 则复用。源码根目录提供同一份安装指南。
 
 仓库开发方式：
 

@@ -8,8 +8,9 @@ export { buildGraph, retrieveGraph, visibleGraph, graphIdentity } from './graphr
 export { MicrosoftGraphRag, runGraphRag } from './microsoft-graphrag.js';
 export { WriterMemory } from './writer-memory.js';
 export { BookVersions } from './versions.js';
+export { diagnoseModels } from './model-diagnostics.js';
 export { UsageLedger, parseRequestMetrics, usageCost, validatePrices } from './usage.js';
-export type { UsageRecord, ModelUsage, Prices } from './usage.js';
+export type { UsageRecord, ModelUsage, Prices, UsageBudget } from './usage.js';
 export { runBenchmark, scoreBenchmark } from './benchmark.js';
 export type { BenchmarkOptions, BenchmarkDataset, BenchmarkCase, BenchmarkArm } from './benchmark.js';
 export { NovelReader } from './reader.js';

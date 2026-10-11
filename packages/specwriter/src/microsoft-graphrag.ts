@@ -7,11 +7,13 @@ import { parse, stringify } from 'yaml';
 import { assetsRoot, atomicWrite, chapterId, hash, json, readJson, safePath, writeNew } from './files.js';
 import type { Project } from './project.js';
 import type { GraphRagMethod, RetrievalReceipt, RetrievalSource } from './types.js';
-import { UsageLedger } from './usage.js';
+import { UsageLedger, type UsageBudget } from './usage.js';
 import { completionCredentials, isLoopbackApi, modelApiBase } from './provider-config.js';
+import { diagnoseModels } from './model-diagnostics.js';
 
 export interface ProcessResult { stdout: string; stderr: string }
-export interface ProcessOptions { signal?: AbortSignal; timeoutMs?: number; onSpawn?: (pid: number) => void; metricsPath?: string }
+export interface ProcessOptions { signal?: AbortSignal; timeoutMs?: number; onSpawn?: (pid: number) => void; metricsPath?: string;
+  budget?: UsageBudget & { initialTokens: number; initialCost: number } }
 export type ProcessRunner = (executable: string, args: string[], cwd: string, options?: ProcessOptions) => Promise<ProcessResult>;
 
 /** Keep prompts/keys out of error output; detailed logs remain in the private workspace. */
@@ -20,7 +22,10 @@ export const runGraphRag: ProcessRunner = (executable, args, cwd, options = {}) 
   if (options.timeoutMs !== undefined && (!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs < 1)) { reject(new Error('GraphRAG timeout must be a positive integer')); return; }
   const observedArgs = options.metricsPath && args[0] === '-m' && args[1] === 'graphrag'
     ? ['-X', 'utf8', safePath(assetsRoot, 'graphrag-observe.py'), options.metricsPath, ...args.slice(2)] : args;
-  const child = spawn(executable, observedArgs, { cwd, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const env = { ...process.env };
+  delete env.SPECWRITER_USAGE_BUDGET;
+  if (options.budget) env.SPECWRITER_USAGE_BUDGET = JSON.stringify(options.budget);
+  const child = spawn(executable, observedArgs, { cwd, env, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   // Stream decoders preserve Chinese characters even across split UTF-8 pipe chunks.
   child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
   let stdout = ''; let stderr = ''; let overflow = false;
@@ -42,6 +47,7 @@ export const runGraphRag: ProcessRunner = (executable, args, cwd, options = {}) 
     options.signal?.removeEventListener('abort', abort);
     if (stopReason) reject(new Error(stopReason));
     else if (overflow) reject(new Error('GraphRAG output exceeded the capture limit; inspect its private logs'));
+    else if (code !== 0 && stderr.includes('SpecWriter usage budget stopped')) reject(new Error('SpecWriter usage budget stopped further model requests; inspect memory budget show and memory usage. Unfinished indexes are not marked ready.'));
     else if (code !== 0 && stderr.includes('LanceDB needs a shorter book path on this Windows volume')) reject(new Error('LanceDB requires a shorter novel directory on this Windows volume; use a path such as E:/novels/book'));
     else if (code !== 0) reject(new Error(`GraphRAG exited with code ${code}; inspect private workspace logs (credentials are not printed)`));
     else resolve({ stdout, stderr });
@@ -67,10 +73,13 @@ export class MicrosoftGraphRag {
   private async run(executable: string, args: string[], root: string, signal?: AbortSignal) {
     const operation = args[0] === '-m' && args[1] === 'graphrag' && ['index', 'update', 'query'].includes(args[2]!) ? args[2] as 'index' | 'update' | 'query' : undefined;
     const ledger = new UsageLedger(this.project.root);
-    const session = operation ? ledger.start(root, operation) : undefined;
+    const budget = operation ? ledger.acquireBudget() : undefined;
+    let session: ReturnType<UsageLedger['start']> | undefined;
     let success = false;
     try {
-    const result = await this.runner(executable, args, root, { signal, ...(session ? { metricsPath: session.rawPath } : {}), onSpawn: childPid => {
+    session = operation ? ledger.start(root, operation) : undefined;
+    const result = await this.runner(executable, args, root, { signal, ...(session ? { metricsPath: session.rawPath } : {}), ...(budget ? { budget: budget.guard } : {}), onSpawn: childPid => {
+      budget?.onSpawn(childPid);
       const path = safePath(root, '.specwriter-operation.lock');
       if (!existsSync(path)) return;
       const lock = readJson<{ pid: number; startedAt: string; childPid?: number }>(path);
@@ -79,8 +88,10 @@ export class MicrosoftGraphRag {
     } });
     success = true; return result;
     } finally {
-      if (session) try { ledger.finish(session, success); }
-      catch { process.stderr.write('SpecWriter: could not persist GraphRAG usage; this operation has unknown usage.\n'); }
+      try {
+        if (session) try { ledger.finish(session, success); }
+        catch { process.stderr.write('SpecWriter: could not persist GraphRAG usage; this operation has unknown usage.\n'); }
+      } finally { budget?.release(); }
     }
   }
   private path(...parts: string[]): string { return safePath(this.project.root, '.specwriter', 'graphrag', ...parts); }
@@ -91,10 +102,17 @@ export class MicrosoftGraphRag {
     return provider;
   }
   private async checkVersion(python: string, signal?: AbortSignal): Promise<string> {
-    const result = await this.runner(python, ['-c', 'from importlib.metadata import version; print(version("graphrag"))'], this.project.root, { signal });
+    const result = await this.runner(python, ['-c', 'from importlib.metadata import version; print(version("graphrag"))'], this.project.root, { signal, timeoutMs: 15000 });
     const version = result.stdout.trim();
     if (!/^3\.3\.\d+$/.test(version)) throw new Error('Install graphrag==3.3.0 in Python >=3.11,<3.14; the adapter currently supports 3.3.x');
     return version;
+  }
+  async diagnose(options: { probe?: boolean; signal?: AbortSignal; fetch?: typeof fetch } = {}) {
+    let runtime = { ready: false, version: null as string | null, issue: null as string | null };
+    try { runtime.version = await this.checkVersion(this.provider().python, options.signal); runtime.ready = true; }
+    catch { runtime.issue = 'GraphRAG Python is unavailable or incompatible; install graphrag==3.3.0 in Python >=3.11,<3.14 and rerun setup'; }
+    const models = await diagnoseModels(this.project.root, { ...options, probe: options.probe && runtime.ready });
+    return { runtime, ...models, ready: runtime.ready && models.ready };
   }
   private async locked<T>(root: string, action: () => Promise<T>): Promise<T> {
     mkdirSync(root, { recursive: true });
@@ -156,6 +174,7 @@ export class MicrosoftGraphRag {
       }
       atomicWrite(this.path('provider.json'), json({ schemaVersion: 1, python, version }));
       return { provider: 'microsoft-graphrag', version, directory: root, settings: safePath(root, 'settings.yaml'), credentials: safePath(root, '.env'),
+        nextActions: ['memory graphrag diagnose', 'memory graphrag diagnose --probe'],
         note: 'Setup does not call models. Existing settings are preserved unless --reconfigure is explicit. Rebuild existing indexes after configuration changes.' };
     });
   }

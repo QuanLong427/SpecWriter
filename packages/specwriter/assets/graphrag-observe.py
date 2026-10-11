@@ -6,6 +6,8 @@ This is a version-pinned compatibility hook, not a model provider implementation
 """
 import json
 import math
+import os
+import importlib
 import runpy
 import sys
 import threading
@@ -108,6 +110,11 @@ def main():
 
     DefaultMetricsProcessor.process_metrics = process
     MemoryMetricsStore.update_metrics = update
+    if os.environ.get("SPECWRITER_USAGE_BUDGET"):
+        from specwriter_budget import RequestBudget
+        pipeline = importlib.import_module("graphrag_llm.middleware.with_middleware_pipeline")
+        budget = RequestBudget(json.loads(os.environ["SPECWRITER_USAGE_BUDGET"]), emit)
+        pipeline.with_metrics = budget.wrap_metrics(pipeline.with_metrics)
     emit({"observer": 1})
     sys.argv = ["graphrag", *sys.argv[2:]]
     try:

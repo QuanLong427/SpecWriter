@@ -122,6 +122,7 @@ export class Project {
       name: loadConfig(this.root).name, generation, acceptedChapters: revisions.length,
       memoryBackend: loadConfig(this.root).memory!.backend,
       graphRagConfigured: existsSync(this.path('.specwriter', 'graphrag', 'provider.json')),
+      backup: new BookVersions(this.root).status(this),
       memoryThrough: trusted.length, nextChapter: trusted.length + 1,
       staleChapters: revisions.filter(item => item.stale).map(item => item.chapter),
       dirtyFiles: dirty, projectionNeedsSync: projectedGeneration !== generation,

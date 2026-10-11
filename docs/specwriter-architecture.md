@@ -117,3 +117,13 @@ NovelReader 从 SQLite 的正式 revision 读取正文，按 trustedPrefix 标�
 | 大规模返修与章节结构 | 修改旧章后所有后续记忆 stale，正式导出截到有效前缀；章号固定顺序 | 展示影响和协调进度；细粒度重审、插章/拆章/重排排后续 |
 
 当前使用 Skills（$specwriter-*）与自然语言调用 CLI；尚未提供 OpenSpec 式 /sw:* 命令、MCP 或 Codex 插件市场安装包。不要把这些发行/交互形式与现有功能闭环混为一谈。除记忆召回外，规模验收还需覆盖建库与增量更新耗时、内存/磁盘峰值、阅读/导出、备份/恢复和返修成本。
+
+## v0.7：使用边界完善
+
+新增 Qwen＋本地 BGE-M3 配置预设，--credentials 避免部分 Node 对 --env-file 的抢先解析。doctor --models / memory graphrag diagnose 默认只检查已安装的 Python 版本及模型配置，--probe 显式发送小请求，验证 HTTP、embedding 维度并单独返回探测用量；配置完整不再等同连接可用。
+
+BookVersions.status 对照真实 Git HEAD，检测作者文件新增/修改/删除和数据库 generation/工作包变化；保存失败写入通用错误记录，跨进程保留并在成功保存后清除。既有检查点兼容，新检查点加入 stateHash。异常状态 needsSave=null，不能假装备份成功。保存过程比对一致性数据库副本的状态哈希，避免工作包变化未提升 generation 时复制错位。
+
+UsageLedger 增加每书预算配置与锁，每次 index/update/query 启动前核对历史观测 token 和用户提供的价格。版本绑定 Python observer 在缓存内部、重试内部的模型调用入口同步预留次数，sync/async 共用计数；缓存命中不计新调用。请求尝试上限、响应后 token/费用阈值、未知用量处理分别明确。已有在途调用和底层传输重试可能使金额超过阈值，因此不是供应商账单硬上限。
+
+受限作业按书串行，锁跟踪主/子 PID，recover 拒绝活动进程。预算文件与数值 operations 账本进入 Git 检查点，raw metrics/索引/密钥继续排除。恢复旧检查点不会撤销已发生费用，仍须核对后续账单。Codex 和探测用量不纳入该作业限制。真实创作验收、百万字规模评测、硬创作规则和批注修订关联仍待后续完善。

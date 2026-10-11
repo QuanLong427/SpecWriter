@@ -1,6 +1,8 @@
 # SpecWriter
 
-本轮新增每本小说独立的 Git 检查点与 bundle 迁移恢复，并补齐关键状态唯一性、逐项证据审阅和 GraphRAG 回答冲突核对。使用方式见 [小说版本与备份](packages/specwriter/assets/versioning.md) 和 [CLI 文档](packages/specwriter/README.md)。
+首次安装可直接把 [install.md](install.md) 交给 Codex，让它实际检查依赖、安装、配置 Qwen＋BGE-M3 并验证。文档内提供可复制的安装提示，已有环境与小说会保留，作者无需逐条运行内部命令。
+
+v0.7 增加 Qwen＋BGE-M3 配置预设、模型可用性诊断、持续显示待备份改动和 GraphRAG 请求/token/费用阈值。使用方式见 [CLI 文档](packages/specwriter/README.md) 和 [小说版本与备份](packages/specwriter/assets/versioning.md)。
 
 SpecWriter 是面向 Codex 的长篇小说创作工作流，WriterMemory 是其长期记忆模块。通过创作约定、滚动计划、正文审阅和有证据的记忆提交，帮助 Agent 在新会话和长篇写作中恢复人物、伏笔与剧情状态。
 
@@ -20,7 +22,7 @@ node packages/specwriter/dist/cli.js init E:\novels\my-book --name "我的小说
 
 默认后端需要 Python >=3.11,<3.14、`graphrag==3.3.0` 和模型凭据。运行 `memory graphrag setup --python EXE --model MODEL --embedding MODEL` 初始化供应商配置。第一章没有历史正文，跳过索引与模型检索；从第二章起 prepare 自动索引已接纳前缀并取回语义记忆。详见下方记忆文档。离线体验可在 init 时加 `--backend local`。
 
-支持 Qwen 生成 + 本地 Ollama BGE-M3 向量化：setup 可通过 `--env-file FILE --provider qwen` 读取现有凭据，并用 `--embedding bge-m3 --embedding-base http://127.0.0.1:11434/v1 --embedding-dimensions 1024` 配置本地 embedding。完整命令及费用边界见 [本地 BGE-M3 接入](packages/specwriter/assets/memory.md#本地-bge-m3--qwen)。
+支持 Qwen 生成 + 本地 Ollama BGE-M3 向量化：运行 `memory graphrag setup --python EXE --credentials FILE --preset qwen-bge-m3`，读取现有凭据并配置 1024 维本地向量服务。`doctor --models` 检查配置与 Python，显式加 `--probe` 才发送小请求验证模型。完整命令及费用边界见 [记忆接入](packages/specwriter/assets/memory.md)。
 
 - [安装、命令与使用说明](packages/specwriter/README.md)
 - [架构与数据边界](docs/specwriter-architecture.md)
