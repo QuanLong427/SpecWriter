@@ -10,7 +10,7 @@ import { demoReview } from './artifacts.mjs';
 const python = process.argv[2];
 if (!python) throw new Error('Usage: node examples/graphrag-smoke.mjs PATH/TO/PYTHON_WITH_GRAPHRAG_3.3');
 const root = mkdtempSync(join(tmpdir(), 'specwriter-graphrag-smoke-'));
-initProject(root, 'GraphRAG compatibility');
+initProject(root, 'GraphRAG compatibility', { workflow: 'legacy' });
 const project = new Project(root);
 try {
   project.propose('smoke', '兼容性检查', 1, 1);

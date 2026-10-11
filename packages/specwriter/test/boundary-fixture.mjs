@@ -7,7 +7,7 @@ export const load = path => JSON.parse(readFileSync(path, 'utf8'));
 export function book(t) {
   const directory = mkdtempSync(join(tmpdir(), 'specwriter-boundary-'));
   const root = join(directory, 'book');
-  initProject(root, '边界验证', { memoryBackend: 'local' });
+  initProject(root, '边界验证', { memoryBackend: 'local', workflow: 'legacy' });
   const project = new Project(root); project.propose('arc', '开篇', 1, 3); project.sync();
   t.after(() => { project.close(); rmSync(directory, { recursive: true, force: true }); });
   return { directory, root, project };

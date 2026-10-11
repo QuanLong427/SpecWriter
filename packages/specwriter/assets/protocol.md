@@ -4,12 +4,13 @@
 
 ## 调用与恢复
 
-在小说项目根目录运行 `node .specwriter/bin/specwriter.mjs <command> --json`。这个本地启动器由 init 生成；如启动器依赖的 SpecWriter 安装移动了，重新运行原安装的 init。以下示例省略 `node .specwriter/bin/specwriter.mjs` 前缀。先运行 `status`，根据 active works、pending、memoryThrough、staleChapters 恢复进度，不依赖聊天记录。
+在小说项目根目录运行 `node .specwriter/bin/specwriter.mjs <command> --json`。这个本地启动器由 init 生成；如启动器依赖的 SpecWriter 安装移动了，重新运行原安装的 init。以下示例省略 `node .specwriter/bin/specwriter.mjs` 前缀。新书遵守 [结构化创作流程](workflow.md)，先运行 `resume`，根据 active works、pending、memoryThrough、staleChapters 恢复进度，不依赖聊天记录。
 
 - `propose opening-arc --title "开篇三章" --from 1 --to 3` 创建工作包；明确采用的设定放在 `specwriter/specs/`，未来安排放在 `specwriter/plans/`。
+- 新书先 contract adopt、work authorize、intent seed/save，再 prepare；章纲变更先 save 再 refresh。
 - `prepare 1 --work opening-arc --query "本章冲突、人物和地点"` 取回带章节边界的记忆，返回所有路径。首章跳过模型检索；后续章节默认自动索引前缀、查询 Microsoft GraphRAG 并加入 context。
 - `memory query "青铜钥匙" --at 1` 默认语义检索；`--method global` 可做全局分析。角色认知核对用 `memory query "师父" --backend local --at 1 --holder 林舟 --hops 2`；world 与原文仍是作者视角，不能当作角色已知清单。
-- 完善 intent 后 `prepare 1 --work opening-arc --refresh`，将章纲及视角边界重新纳入上下文；保留已写草稿。
+- 新书修改 intent.json 后先 intent save，再 `prepare 1 --work opening-arc --refresh`，将章纲及视角边界重新纳入上下文；保留已写草稿。
 - `hash 1 --work opening-arc` 获取草稿、上下文与章纲哈希。该命令只读，不能证明旧提取结果仍有效。
 - `review-requirements 1 --work opening-arc` 在提取完成后获取逐项审阅的声明哈希、证据及检索核对要求。
 - `verify 1 --work opening-arc` 检查结构、原文证据、版本、状态前置条件和阻塞问题。
@@ -25,6 +26,7 @@
 - `specwriter/plans/outline.md`、`volumes/*.md`：全书方向和滚动展开的卷计划，禁止作为已发生事件的证据。
 - `specwriter/work/<id>/proposal.md`：这轮作者意图、范围、必须保留和避免、创作约定变更、回顾。
 - `tasks.md`：自动生成进度，额外的作者待办写在 proposal 中。
+- `intent.json`：新书受 schema 校验的章纲，必选依赖、认知与揭露边界；intent save 生成 Markdown。
 - `intent.md`：本章目标、场景安排、视角、信息边界、必须保留与避免。
 - `context.json`：准备时实际加载的输入、原文、记忆与来源。不要手工改写。
 - `manuscript/drafts/<work>/<chapter>.md`：草稿。
@@ -38,7 +40,7 @@
 
 ## 提取与审阅
 
-阅读准备命令返回的 context 与必要原文，完成 intent，运行 prepare --refresh 后写正文。然后获取 hash，依据**当前草稿**重新提取、重新审阅，将返回的 chapter、baseRevision、contextHash、draftHash、intentHash 填入对应 JSON。新准备的 context 使用 contractVersion=2，delta/review 使用 schemaVersion=2；不能降级为 1 绕过检查。已接纳的版本 1 正文与提取仍可重放，旧待写草稿先 refresh。
+新书先完成 intent.json 并 intent save，再 prepare，读取返回的 context 与必要原文后写作；改章纲须 save、prepare --refresh。旧书保留 Markdown 章纲流程。然后获取 hash，依据**当前草稿**重新提取、重新审阅，将返回的 chapter、baseRevision、contextHash、draftHash、intentHash 填入对应 JSON。新准备的 context 使用 contractVersion=2，delta/review 使用 schemaVersion=2；不能降级为 1 绕过检查。已接纳的版本 1 正文与提取仍可重放，旧待写草稿先 refresh。
 
 memory-delta 中每条事件、状态变化、关系、伏笔、新人物和事实都需要 `evidence: {"quote": "当前草稿中连续、逐字一致的原文", "basis": "established"}`。basis 区分 established（正文确立）、reported（传闻/转述）、inferred（推测）、imagined（梦境/想象）；world 事实及无 scope 的变更必须是 established，其他三类只能作为角色认知记录。正文明确发生的“听见传闻”可记录为真实动作，传闻结论本身不能升级为世界事实。引用重复出现时必须添加 start/end，按 JavaScript UTF-16 字符偏移、end 不含末尾字符，精确定位当前草稿。
 
@@ -71,3 +73,5 @@ memory-delta 中每条事件、状态变化、关系、伏笔、新人物和事�
 直接编辑正式章节后，`sync --capture` 先保存所有修改到 `manuscript/drafts/imported/`，再恢复数据库中的已接纳正文。将导入稿复制到新工作包的草稿，重新提取和审阅后接纳。普通 sync 不覆盖未接纳的直接编辑。
 
 archive 只关闭工作包并保存文档/版本清单；不会把未写出的计划写入 Memory。未完成的章节不能归档。
+
+context.workflow 存在时还需按 review-requirements.intentChecks 逐项填写 intent_checks，见 workflow.md。contract adopt 固定版本，work authorize 控制范围和接纳模式，resume 无模型调用恢复实际任务。

@@ -1,6 +1,6 @@
 # 交给 Codex 执行的 SpecWriter 安装指南
 
-适用版本：SpecWriter 0.7.x。主要环境：Windows＋PowerShell。目标是把 SpecWriter 安装到本机，配置 Microsoft GraphRAG＋Qwen＋本地 BGE-M3，创建可在 Codex 中使用的独立小说目录。
+适用版本：SpecWriter 0.8.x。主要环境：Windows＋PowerShell。目标是把 SpecWriter 安装到本机，配置 Microsoft GraphRAG＋Qwen＋本地 BGE-M3，创建可在 Codex 中使用的独立小说目录。
 
 ## 用户怎么使用这份文件
 
@@ -93,7 +93,7 @@ node "$SwCliPath" help
 
 ```powershell
 $SwInstallRoot = '替换为专用安装目录的绝对路径'
-$SwPackageFile = '替换为本地 specwriter-0.7.x.tgz 的绝对路径'
+$SwPackageFile = '替换为本地 specwriter-0.8.x.tgz 的绝对路径'
 npm.cmd install --prefix "$SwInstallRoot" "$SwPackageFile"
 $SwPackageRoot = Join-Path $SwInstallRoot 'node_modules/specwriter'
 $SwRuntimeRoot = $SwInstallRoot
@@ -200,7 +200,7 @@ node .specwriter/bin/specwriter.mjs doctor --models --json
 node .specwriter/bin/specwriter.mjs version status --json
 ```
 
-检查 doctor.healthy=true、models.runtime.ready=true、models.configured=true，且 init 生成的 7 个 `.agents/skills/specwriter-*/SKILL.md` 和本地启动器完整。新版 status.backup 应可读取检查点；若作者文档在初始化后又改动，needsSave=true 是待保存，不伪报为 Git 故障。
+检查 doctor.healthy=true、models.runtime.ready=true、models.configured=true，且 init 生成的 8 个 `.agents/skills/specwriter*/SKILL.md`（总入口＋7 个专项） 和本地启动器完整。新版 status.backup 应可读取检查点；若作者文档在初始化后又改动，needsSave=true 是待保存，不伪报为 Git 故障。
 
 已有小请求探测授权时执行一次：
 
@@ -239,7 +239,7 @@ node .specwriter/bin/specwriter.mjs read --no-open
 
 > 按我授权的范围连续写三章，每章完成审阅后接纳，我随时会提出修改意见。
 
-也可以使用 `$specwriter-explore`、`$specwriter-propose`、`$specwriter-write`、`$specwriter-review`、`$specwriter-revise`、`$specwriter-commit`、`$specwriter-archive`。
+推荐 `$specwriter` 总入口，按创作流程采用约定、记录授权并完成 intent 后写作。新书 resume 显示未开始/缺少约定或工作包是正常状态，安装阶段不采用空模板或伪造写作授权。也可以使用 `$specwriter-explore`、`$specwriter-propose`、`$specwriter-write`、`$specwriter-review`、`$specwriter-revise`、`$specwriter-commit`、`$specwriter-archive`。
 
 阅读时在小说目录运行 `node .specwriter/bin/specwriter.mjs read`；通过阅读器批注，再让 Codex 读取反馈修订。正式导出使用 `export --format txt`、`md` 或 `html`。首次创作由 Codex 阅读生成的 AGENTS.md、Skills 和协议执行，不要求作者手工填写提取或审阅 JSON。
 

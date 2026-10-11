@@ -6,7 +6,7 @@ import { demoReview } from './artifacts.mjs';
 
 // Deterministic, model-free demonstration of the same artifact protocol used by Codex Skills.
 const root = mkdtempSync(join(tmpdir(), 'specwriter-demo-'));
-initProject(root, '废井中的青铜钥匙', { memoryBackend: 'local' });
+initProject(root, '废井中的青铜钥匙', { memoryBackend: 'local', workflow: 'legacy' });
 const project = new Project(root);
 const parse = path => JSON.parse(readFileSync(join(root, path), 'utf8'));
 const save = (path, value) => writeFileSync(join(root, path), JSON.stringify(value, null, 2) + '\n');

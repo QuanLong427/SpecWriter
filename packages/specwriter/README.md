@@ -6,6 +6,43 @@
 
 本轮补齐重要边界：关键当前状态唯一性、声明与证据逐项审阅、检索引用状态与正式记忆冲突核对，以及每本小说独立的 Git 检查点和迁移恢复。自动核对覆盖常见明确句式，复杂语义仍由 Codex 审阅。
 
+## 作者从哪里开始
+
+安装后，在 Codex 中打开 **小说目录**，使用 `$specwriter` 总入口。作者提供想法、授权与阅读意见，Codex 操作章纲、记忆和内部命令。下面是一套可直接发给 Codex 的使用顺序。
+
+| 阶段 | 发给 Codex 的示例 | 得到什么 |
+| --- | --- | --- |
+| 构思 | `$specwriter 构思一部长篇河镇悬疑小说，先给我四份设定和开篇三章计划，暂不写正文。` | 可审阅的创作约定和近期计划 |
+| 第一章草稿 | `$specwriter 采用当前设定，把开篇三章作为工作包，本次只授权第一章草稿。完成章纲、写作、提取和审阅后给我看，先不接纳。` | 已采用约定、draft 授权、章纲和可阅读草稿 |
+| 草稿修订 | `$specwriter 按阅读器中第一章的批注修订，重新提取审阅，先给我看。` | 修改后的草稿和版本绑定的审阅 |
+| 接纳与连续写作 | `$specwriter 接纳修改后的第一章，继续写第2至第3章，授权每章审阅和verify通过后自动接纳，到第3章停止。` | 逐章正式正文和更新后的长期记忆 |
+| 暂停 | `$specwriter 暂停当前工作包，我先审阅。` | 保存暂停，阅读和审阅仍可用 |
+| 换会话 | `$specwriter 从当前目录恢复进度，先说明正式章节、待审稿与过期后文，不继续写。` | 从本地记录恢复任务，作者明确要求恢复后再推进 |
+| 阶段交付 | `$specwriter 回顾并归档开篇工作包，导出当前有效正文并保存Git检查点。先给我下一段计划，不写新章。` | 工作包回顾、TXT/Markdown/HTML、备份与后续计划 |
+
+**第一章未接纳时不能准备第二章。** 连续创作按章进行：章纲与取记忆 → 草稿 → 提取审阅 → verify → 按授权 commit → 下一章。draft 只允许写和审阅，auto 才能接纳；不能先生成全部三章草稿再共用正式记忆。已有明确授权无需每章重复确认，到范围边界停止。
+
+阅读器负责阅读与批注，正文由 Codex 修订。小说目录中运行 `node .specwriter/bin/specwriter.mjs read` 看正式正文；草稿用 `read --draft --work ID`，ID 取实际工作包。命令持续运行，Ctrl+C 停止；后续命令使用其他终端。批注后在对话中要求 Codex 修订，批注本身不自动改文。
+
+旧章重新接纳会让后文记忆需要重审，按授权逐章协调后再导出；过期批注要重新定位。`exports/novel.{txt,md,html}` 只包含连续有效正式章节。启用 version init 后接纳自动备份；单独改设定、批注或归档后 version save。每本书的数据隔离，Python/Ollama/BGE-M3 可以共用。
+
+完整内部步骤见 [创作流程](assets/workflow.md) 和 [阅读协议](assets/reader.md)。当前逐章闭环已经连通；回顾由 Codex 在工作文档中记录，尚未提供独立自动卷回顾、完结检查或无人值守服务。三章固定样例验证流程，不能作为百万字或文学质量保证。
+
+
+## v0.8：把创作任务和记忆接起来
+
+新增总入口 `$specwriter`，由 Codex 按作者意图协调已有七个专项 Skills。新书默认 structured 工作流：先采用四份创作约定，再记录工作范围和接纳模式，完成结构化章纲后 prepare。完整步骤见 [创作流程](assets/workflow.md)。
+
+`contract adopt` 将 Spec 快照保存在本书 SQLite 中，按章节选版本。改草稿 Spec 不会改变已采用约定；再次采用会使未完成上下文失效，不修改已接纳正文。`intent seed/save` 管理 intent.json 和生成的 intent.md。章纲绑定目标、场景、人物、POV、故事时间、必选状态/资源/事件/伏笔和揭露边界；未来计划不会入库。
+
+参与人物和 POV 的关键状态、余额、显式依赖、上章末尾进入受保护上下文，预算装不下时拒绝准备；其余历史按预算检索。目标、角色认知和暂不揭露事项通过逐项 intent_checks 审阅。缺少已登记认知会提示核对，不能据此推断角色未知或已知。
+
+`work authorize` 记录实际作者范围：draft 允许写和审阅，auto 才允许接纳；pause 阻止 prepare/commit，保留阅读/审阅。`resume` 从文件恢复下一步，不调用模型。Git 检查点包含约定和授权，政策单独变更也显示待备份。
+
+旧书缺少 workflow 配置时保留旧流程，重新 init 更新未改动的 Skills；选择新流程后采用一次 contract。迁移不自动补写旧正文的稳定实体和事实，依赖缺失时须核对。API 的 legacy 选项仅用于旧流程和固定测试，不作为默认新书模式。
+
+本轮验证包括协议回归和三章原创短篇流程演练；没有做付费 Qwen 建库、独立文学盲评或百万字验证。卷回顾、完结和更深入的记忆优化依后续阶段实施，源码仓库的 docs/v0.8-workflow-validation.md 保存详细验证范围。
+
 ## v0.7：模型诊断、备份状态和用量限制
 
 在小说目录配置已有 Qwen 凭据与本地 BGE-M3（Ollama 须已安装并启动，执行 `ollama pull bge-m3` 获取模型）：
@@ -62,12 +99,13 @@ node packages/specwriter/dist/cli.js init E:\novels\my-book --name "我的小说
 
 需要全局终端命令时，在构建后运行 `npm link --workspace specwriter`。也可对本包 `npm pack`，安装生成的 tgz；本项目尚未发布到 npm。
 
-初始化小说后，按下方“默认 Microsoft GraphRAG”步骤配置生成模型和 embedding 模型。第 1 章没有已接纳的历史正文，可以直接准备；从第 2 章起默认 prepare 自动索引并检索。只体验离线模式时，在 init 命令添加 `--backend local`。
+初始化小说后，按下方“默认 Microsoft GraphRAG”步骤配置生成模型和 embedding 模型。第 1 章没有已接纳的历史正文，完成约定、授权及章纲后可准备；从第 2 章起默认 prepare 自动索引并检索。只体验离线模式时，在 init 命令添加 `--backend local`。
 
-在 Codex 中打开刚创建的小说目录。init 安装项目级 `.agents/skills/specwriter-*/SKILL.md`；已有会话可能需要重新打开或刷新技能发现。用户通过以下 Skills 或自然语言交互：
+在 Codex 中打开刚创建的小说目录。init 安装项目级 `.agents/skills/specwriter*/SKILL.md`；已有会话可能需要重新打开或刷新技能发现。用户通过以下 Skills 或自然语言交互：
 
 | Skill | 用途 |
 | --- | --- |
+| `$specwriter` | 开始或恢复创作，协调专项流程 |
 | `$specwriter-explore` | 构思、讨论与解决剧情卡点 |
 | `$specwriter-propose` | 建立创作约定、卷计划和有范围的工作包 |
 | `$specwriter-write` | 记忆检索、章纲、正文、提取与审阅 |
@@ -83,16 +121,24 @@ node packages/specwriter/dist/cli.js init E:\novels\my-book --name "我的小说
 小说根目录有本地启动器，无需依赖全局 PATH：
 
 ```powershell
-node .specwriter/bin/specwriter.mjs status --json
+node .specwriter/bin/specwriter.mjs resume --json
+# Codex 按作者选择完善四份 Spec 后：
+node .specwriter/bin/specwriter.mjs contract adopt --reason "作者已采用当前设定"
 node .specwriter/bin/specwriter.mjs propose opening --title "开篇三章" --from 1 --to 3
-node .specwriter/bin/specwriter.mjs prepare 1 --work opening --query "林舟、废井、青铜钥匙"
+node .specwriter/bin/specwriter.mjs work authorize opening --from 1 --to 3 --acceptance draft --reason "作者要求先审阅草稿"
+node .specwriter/bin/specwriter.mjs intent seed 1 --work opening
+# Codex 填写返回的 intent.json 后：
+node .specwriter/bin/specwriter.mjs intent save 1 --work opening
+node .specwriter/bin/specwriter.mjs prepare 1 --work opening
 ```
 
-prepare 返回 intent、context、draft、delta、review 路径。Codex 完善章纲后先 `prepare 1 --work opening --refresh`，再完成正文、事实提取和审阅；`hash 1 --work opening` 提供正文、上下文和 intentHash。版本 2 契约要求证据 basis 和证据/遗漏/连续性三项有依据的审阅检查，修改章纲也会使旧候选失效。随后：
+prepare 返回 intent、context、draft、delta、review 路径。新书 Codex 改章纲后先 intent save，再 `prepare 1 --work opening --refresh`，再完成正文、事实提取和审阅；`hash 1 --work opening` 提供正文、上下文和 intentHash。版本 2 契约要求证据 basis 和证据/遗漏/连续性三项有依据的审阅检查，修改章纲也会使旧候选失效。作者授权 auto 模式后才能接纳。随后：
 
 新准备的上下文要求 Codex 在提取后运行 `review-requirements N --work ID`，逐项填写 critical_checks 的当前声明哈希、精确证据、判定和说明。位置、生死、境界、真实身份只能保留一个当前世界值；变更必须用 state_changes 匹配旧值。显式“以为/听说/梦见”不能仅靠 established 标签确立真相。检索 assessment 会报告缺失/未解析引用和已识别的状态/余额冲突；未通过的回答不进入续写素材，审阅需回到正式记忆和原文填写 retrieval_check。引用可定位仍不代表推断成立。
 
 ```powershell
+# 仅在作者已审阅并明确要求接纳第一章后执行：
+node .specwriter/bin/specwriter.mjs work authorize opening --from 1 --to 1 --acceptance auto --reason "作者已审阅并要求接纳第一章"
 node .specwriter/bin/specwriter.mjs verify 1 --work opening
 node .specwriter/bin/specwriter.mjs commit 1 --work opening
 node .specwriter/bin/specwriter.mjs memory query "青铜钥匙" --at 1
@@ -112,7 +158,7 @@ CLI 默认输出 JSON；`--json` 还会将错误格式化为 JSON（写到 stder
 | `manuscript/drafts/` | 未接纳草稿和导入稿 |
 | `manuscript/chapters/` | 已接纳正文的投影 |
 | `specwriter/memory/views/` | 实体、事件、资源、当前状态、角色认知、伏笔、时间线、摘要投影 |
-| `.specwriter/memory/writer.db` | 正文历史版本、候选事实、审阅、上下文、进度的正式数据源 |
+| `.specwriter/memory/writer.db` | 正文历史版本、正式事实、审阅、上下文、进度、采用约定和授权的正式数据源 |
 | `.specwriter/graphrag/` | 默认后端配置、按版本隔离的正文/向量/社区报告与查询缓存（默认忽略） |
 | `specwriter/archive/<id>/` | 工作文档快照与正文版本清单 |
 
@@ -124,13 +170,13 @@ CLI 默认输出 JSON；`--json` 还会将错误格式化为 JSON（写到 stder
 
 默认 prepare 使用 Microsoft GraphRAG 的查询结果，并保留正式事实、近期人物和两跳结构关系作为状态依据。检索回答以 kind=retrieval 写入 context；记录前缀/索引版本、receiptId 与回答哈希，verify/commit 复用并校验同一记录，不再次调用模型。预算按字符计算，不冒充模型 token，长回答明确截取；未选入上下文的正式记忆仍留在数据库中。原文索引使用 SQLite FTS5/BM25；`memory rebuild` 重建全文与本地图缓存，Microsoft 索引单独校验/建立。`memory query --backend local --hops` 支持 1–4 跳，`--holder` 额外限定角色 belief；world 与原文仍为作者视角。
 
-记录契约参考 ainovel-cli 的章节事实体系与 InkOS 的正文证据状态投影，包含 `entities`、`narrative_events`、`resource_changes` 以及伏笔依赖和替代字段。已接纳的旧 delta 仍可重放，数据库版本保持 2，新提取和审阅使用契约版本 2。已登记人物的名称/别名解析到稳定 ID，统一位置、关系、资源和 holder；同名冲突要求明确 ID。传闻、推测和想象使用 belief，不能建立世界真相。完整字段规则见 [记忆协议](assets/memory.md)。
+记录契约参考 ainovel-cli 的章节事实体系与 InkOS 的正文证据状态投影，包含 `entities`、`narrative_events`、`resource_changes` 以及伏笔依赖和替代字段。已接纳的旧 delta 仍可重放，数据库内部 schema 版本为 3，新提取和审阅使用契约版本 2。已登记人物的名称/别名解析到稳定 ID，统一位置、关系、资源和 holder；同名冲突要求明确 ID。传闻、推测和想象使用 belief，不能建立世界真相。完整字段规则见 [记忆协议](assets/memory.md)。
 
 ## 默认 Microsoft GraphRAG
 
 先在 Python >=3.11,<3.14 的独立虚拟环境安装 `graphrag==3.3.0`（随包 requirements-graphrag.txt 固定版本），再初始化官方配置：
 
-当前本地 embedding 方案使用 BGE-M3：先 `ollama pull bge-m3`，再通过 setup 的 `--env-file FILE --provider qwen --embedding bge-m3 --embedding-base http://127.0.0.1:11434/v1 --embedding-dimensions 1024` 读取 Qwen 并配置本地向量。详见 [本地 BGE-M3 + Qwen](assets/memory.md#本地-bge-m3--qwen)。下面是使用云端 embedding 的可选配置：
+当前本地 embedding 方案使用 BGE-M3：先 `ollama pull bge-m3`，再通过 setup 的 `--credentials FILE --provider qwen --embedding bge-m3 --embedding-base http://127.0.0.1:11434/v1 --embedding-dimensions 1024` 读取 Qwen 并配置本地向量。详见 [本地 BGE-M3 + Qwen](assets/memory.md#本地-bge-m3--qwen)。下面是使用云端 embedding 的可选配置：
 
 ```powershell
 node .specwriter/bin/specwriter.mjs memory graphrag setup --python "E:/novels/book/.graphrag-venv/Scripts/python.exe" --model gpt-4.1 --embedding text-embedding-3-large

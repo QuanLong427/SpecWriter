@@ -14,6 +14,10 @@
       "properties": { "evidence": { "$ref": "#/$defs/check" }, "coverage": { "$ref": "#/$defs/check" }, "continuity": { "$ref": "#/$defs/check" } }
     },
     "reviewed": { "type": "boolean" },
+    "intent_checks": { "type": "array", "items": {
+      "type": "object", "additionalProperties": false, "required": ["id", "verdict", "evidenceQuotes", "explanation"],
+      "properties": { "id": { "type": "string", "minLength": 1 }, "verdict": { "enum": ["satisfied", "uncertain", "violated"] }, "evidenceQuotes": { "type": "array", "items": { "type": "string", "minLength": 1 } }, "explanation": { "type": "string", "minLength": 1, "pattern": "\\S" } }
+    } },
     "critical_checks": { "type": "array", "items": {
       "type": "object", "additionalProperties": false, "required": ["claimHash", "verdict", "evidenceQuote", "explanation"],
       "properties": { "claimHash": { "$ref": "#/properties/draftHash" }, "verdict": { "enum": ["supported", "unsupported", "uncertain"] }, "evidenceQuote": { "type": "string", "minLength": 1 }, "explanation": { "type": "string", "minLength": 1, "pattern": "\\S" } }

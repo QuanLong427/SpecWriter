@@ -1,12 +1,22 @@
 import { Ajv } from 'ajv';
 import { join } from 'node:path';
 import { readJson, schemasRoot } from './files.js';
-import type { ChapterDelta, ChapterReview } from './types.js';
+import type { ChapterDelta, ChapterIntent, ChapterReview } from './types.js';
 import { subjectiveOnly } from './memory-policy.js';
 
 const ajv = new Ajv({ allErrors: true, strict: true });
 const deltaValidator = ajv.compile(readJson(join(schemasRoot, 'chapter-delta.schema.json')));
 const reviewValidator = ajv.compile(readJson(join(schemasRoot, 'review.schema.json')));
+const intentValidator = ajv.compile(readJson(join(schemasRoot, 'chapter-intent.schema.json')));
+export function validateIntent(value: unknown): asserts value is ChapterIntent {
+  if (!intentValidator(value)) throw new Error(`Invalid chapter intent: ${ajv.errorsText(intentValidator.errors)}`);
+  const intent = value as ChapterIntent;
+  if (new Set(intent.newEntities.map(item => item.id)).size !== intent.newEntities.length) throw new Error('Duplicate planned entity ids');
+  if (new Set(intent.newEntities.map(item => item.name.normalize('NFKC').trim().toLowerCase())).size !== intent.newEntities.length) throw new Error('Duplicate planned entity names');
+  if (intent.pov !== null && !/^[a-z][a-z0-9_-]{0,63}$/.test(intent.pov)) throw new Error('Intent POV must be a stable entity id or null');
+  if (intent.storyTime !== null && !intent.storyTime.trim()) throw new Error('Intent storyTime must be nonempty or null');
+  for (const path of intent.planPaths) if (!/^specwriter\/plans\/(?:[a-zA-Z0-9_\-\u4e00-\u9fff]+\/)*[a-zA-Z0-9_\-\u4e00-\u9fff]+\.md$/.test(path)) throw new Error('Intent planPaths must name Markdown files inside specwriter/plans');
+}
 export function validateDelta(value: unknown, body: string): asserts value is ChapterDelta {
   if (!deltaValidator(value)) throw new Error(`Invalid memory delta: ${ajv.errorsText(deltaValidator.errors)}`);
   const delta = value as ChapterDelta;

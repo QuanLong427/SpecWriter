@@ -7,7 +7,7 @@ import { Project, NovelReader, initProject } from '../dist/index.js';
 import { demoReview } from './artifacts.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'specwriter-sustained-'));
-initProject(root, '小舟的二十四站 · 工作流样本', { memoryBackend: 'local' });
+initProject(root, '小舟的二十四站 · 工作流样本', { memoryBackend: 'local', workflow: 'legacy' });
 const project = new Project(root), reader = new NovelReader(project);
 const load = path => JSON.parse(readFileSync(path, 'utf8'));
 function accept(chapter, work, revised = false) {

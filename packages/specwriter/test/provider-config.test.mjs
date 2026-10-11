@@ -26,7 +26,7 @@ test('provider env selects a unique model, rejects ambiguity and hides malformed
 });
 
 test('setup configures local BGE dimensions separately from Qwen and keeps credentials private', async () => {
-  const root = temp(), env = source(root); initProject(root, 'local embedding');
+  const root = temp(), env = source(root); initProject(root, 'local embedding', { workflow: 'legacy' });
   const project = new Project(root), calls = [];
   const runner = async (_python, args) => {
     calls.push(args);

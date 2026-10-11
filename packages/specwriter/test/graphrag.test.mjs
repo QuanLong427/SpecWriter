@@ -19,7 +19,7 @@ test('provider process preserves split Chinese UTF-8, passes literal arguments a
 });
 function fixture(t, to = 4) {
   const root = mkdtempSync(join(tmpdir(), 'specwriter-graph-'));
-  initProject(root, '长篇记忆', { memoryBackend: 'local' });
+  initProject(root, '长篇记忆', { memoryBackend: 'local', workflow: 'legacy' });
   const project = new Project(root);
   project.propose('opening', '开篇', 1, to);
   t.after(() => { project.close(); rmSync(root, { recursive: true, force: true }); });

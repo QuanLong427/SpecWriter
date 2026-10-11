@@ -12,7 +12,7 @@ const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
 const load = path => JSON.parse(readFileSync(path, 'utf8'));
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'specwriter-default-'));
-  initProject(root, '默认 GraphRAG');
+  initProject(root, '默认 GraphRAG', { workflow: 'legacy' });
   const project = new Project(root); project.propose('opening', '开篇', 1, 4);
   t.after(() => { project.close(); rmSync(root, { recursive: true, force: true }); });
   return { root, project };
@@ -64,6 +64,23 @@ async function candidate(memory, project, root, chapter, body, options = {}) {
 async function first(project, root) {
   await candidate(new WriterMemory(project), project, root, 1, '林舟在废井发现青铜钥匙。'); project.commit(1, 'opening');
 }
+
+test('structured chapter uses its intent query and a cached Microsoft receipt through review and acceptance', async t => {
+  const { project, root } = fixture(t); await first(project, root);
+  project.workflow.adopt('作者从第二章采用约定'); project.sync();
+  project.workflow.authorize('opening',2,2,'auto','作者授权第二章逐章审阅接纳');
+  project.workflow.seed(2,'opening');
+  const path=join(root,project.workflow.intentPath(2,'opening'));
+  writeFileSync(path,JSON.stringify({...load(path),goal:'林舟带青铜钥匙前往石门',scenes:['确认钥匙并出发']})); project.workflow.saveIntent(2,'opening');
+  const { memory, calls }=await configured(project,{resolvedSources:true});
+  const {paths,prepared}=await candidate(memory,project,root,2,'林舟带着青铜钥匙走向石门。',{query:''});
+  const context=load(paths.context); assert.ok(context.query.includes('林舟带青铜钥匙前往石门')); assert.equal(context.workflow.version,1);
+  assert.ok(context.retrieval.receiptId); assert.ok(context.sources.some(item=>item.id.startsWith('previous-ending:')&&item.protection==='protected'));
+  const review=load(paths.review); review.intent_checks=[{id:'goal',verdict:'satisfied',evidenceQuotes:['林舟带着青铜钥匙走向石门。'],explanation:'Fixture goal is the departure action explicitly in this prose; not a blind quality judgment.'}];
+  writeFileSync(paths.review,JSON.stringify(review));
+  const count=calls.length; assert.equal(project.verify(2,'opening').valid,true); assert.equal(project.resume().stage,'commit'); project.commit(2,'opening');
+  assert.equal(calls.length,count); assert.equal(prepared.memoryBackend,'microsoft-graphrag');
+});
 
 test('new and legacy unspecified books default to Microsoft; explicit offline configuration preserves author YAML', t => {
   const { root, project } = fixture(t);

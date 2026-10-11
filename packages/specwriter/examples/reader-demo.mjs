@@ -6,7 +6,7 @@ import { Project, NovelReader, initProject, startReader } from '../dist/index.js
 import { demoReview } from './artifacts.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'specwriter-reader-demo-'));
-initProject(root, '废井来信 · 示例小说', { memoryBackend: 'local' });
+initProject(root, '废井来信 · 示例小说', { memoryBackend: 'local', workflow: 'legacy' });
 const project = new Project(root);
 project.propose('opening', '废井来信', 1, 3);
 const bodies = [

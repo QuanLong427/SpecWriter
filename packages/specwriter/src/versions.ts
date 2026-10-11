@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { checkpointState } from './store.js';
 import { existsSync, mkdirSync, readFileSync, readdirSync, lstatSync, writeFileSync, rmSync, mkdtempSync, renameSync } from 'node:fs';
 import { dirname, join, resolve, relative, sep, isAbsolute } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -114,7 +115,7 @@ export class BookVersions {
     return result;
   }
   private stateHash(project: Project) {
-    return sha(Buffer.from(json({ generation: project.store.generation(), works: project.store.works() })));
+    return sha(Buffer.from(json(checkpointState(project.store.db))));
   }
   private secrets(): string[] {
     const values: string[] = [];
@@ -157,8 +158,7 @@ export class BookVersions {
         let generation: number, stateHash: string;
         try {
           generation = Number((copied.prepare("SELECT value FROM meta WHERE key = 'generation'").get() as { value: string }).value);
-          const works = copied.prepare('SELECT id, title, from_chapter AS fromChapter, to_chapter AS toChapter, status FROM work ORDER BY id').all();
-          stateHash = sha(Buffer.from(json({ generation, works })));
+          stateHash = sha(Buffer.from(json(checkpointState(copied))));
         }
         finally { copied.close(); }
         const files: Snapshot['files'] = [], secrets = this.secrets();

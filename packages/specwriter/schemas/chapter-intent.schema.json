@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SpecWriter task intent; plans are not established facts",
+  "type": "object", "additionalProperties": false,
+  "required": ["schemaVersion", "chapter", "goal", "scenes", "participantIds", "newEntities", "pov", "storyTime", "requiredState", "requiredResources", "requiredEvents", "requiredHooks", "knowledgeChecks", "withhold", "expectedChanges", "targetChars", "planPaths"],
+  "properties": {
+    "schemaVersion": { "const": 1 }, "chapter": { "type": "integer", "minimum": 1 },
+    "goal": { "$ref": "#/$defs/text" }, "scenes": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/text" } },
+    "participantIds": { "$ref": "#/$defs/ids" },
+    "newEntities": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["id", "name", "type"], "properties": { "id": { "$ref": "#/$defs/id" }, "name": { "$ref": "#/$defs/text" }, "type": { "enum": ["character", "location", "item", "faction", "concept"] } } } },
+    "pov": { "type": ["string", "null"] }, "storyTime": { "type": ["string", "null"] },
+    "requiredState": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["entity", "fields"], "properties": { "entity": { "$ref": "#/$defs/id" }, "fields": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/text" } } } } },
+    "requiredResources": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["entity", "resource"], "properties": { "entity": { "$ref": "#/$defs/id" }, "resource": { "$ref": "#/$defs/text" } } } },
+    "requiredEvents": { "$ref": "#/$defs/ids" }, "requiredHooks": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/text" } },
+    "knowledgeChecks": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["holder", "topic"], "properties": { "holder": { "$ref": "#/$defs/id" }, "topic": { "$ref": "#/$defs/text" } } } },
+    "withhold": { "$ref": "#/$defs/texts" }, "expectedChanges": { "$ref": "#/$defs/texts" },
+    "targetChars": { "type": ["integer", "null"], "minimum": 1 }, "planPaths": { "$ref": "#/$defs/texts" }
+  },
+  "$defs": {
+    "text": { "type": "string", "minLength": 1, "pattern": "\\S" },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+    "ids": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+    "texts": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/text" } }
+  }
+}

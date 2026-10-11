@@ -4,7 +4,20 @@ import { dirname } from 'node:path';
 import { hash, safePath } from './files.js';
 import { proseChunks, terms } from './memory.js';
 import type { SearchHit } from './memory.js';
-import type { ChapterDelta, ChapterReview, ContextPackage, GraphSnapshot, Revision, WorkItem } from './types.js';
+import type { AdoptedContract, ChapterDelta, ChapterReview, ContextPackage, GraphSnapshot, Revision, WorkItem, WorkPolicy } from './types.js';
+
+/** Also used against a consistent backup copy. Empty migrations preserve v0.7 state hashes. */
+export function checkpointState(db: DatabaseSync) {
+  const generation = Number((db.prepare("SELECT value FROM meta WHERE key = 'generation'").get() as { value: string }).value);
+  const works = (db.prepare('SELECT * FROM work ORDER BY id').all() as unknown as WorkRow[]).map(row => ({ id: row.id, title: row.title, fromChapter: row.from_chapter, toChapter: row.to_chapter, status: row.status }));
+  const state: { generation: number; works: WorkItem[]; workflow?: unknown } = { generation, works };
+  if (db.prepare("SELECT name FROM sqlite_master WHERE name = 'story_contract'").get()) {
+    const contracts = db.prepare('SELECT * FROM story_contract ORDER BY id').all();
+    const policies = db.prepare('SELECT * FROM work_policy ORDER BY work_id').all();
+    if (contracts.length || policies.length) state.workflow = { contracts, policies };
+  }
+  return state;
+}
 
 interface RevisionRow {
   id: number; chapter: number; body: string; body_hash: string;
@@ -41,13 +54,22 @@ export class Store {
         );
       `);
       const version = this.db.prepare("SELECT value FROM meta WHERE key = 'schemaVersion'").get() as { value: string } | undefined;
-      if (version?.value !== '1' && version?.value !== '2') throw new Error('Unsupported memory database schema version');
+      if (!version || !['1', '2', '3'].includes(version.value)) throw new Error('Unsupported memory database schema version');
       // Derived graph cache is added without changing historical chapter/delta contracts.
       if (version.value === '1') this.transaction(() => {
         this.db.exec(`CREATE TABLE IF NOT EXISTS memory_graph (
           snapshot_id TEXT PRIMARY KEY, at_chapter INTEGER NOT NULL, content TEXT NOT NULL,
           checksum TEXT NOT NULL, created_at TEXT NOT NULL
         ) STRICT; UPDATE meta SET value = '2' WHERE key = 'schemaVersion';`);
+      });
+      if (version.value !== '3') this.transaction(() => {
+        this.db.exec(`CREATE TABLE IF NOT EXISTS story_contract (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, from_chapter INTEGER NOT NULL,
+          content TEXT NOT NULL, checksum TEXT NOT NULL
+        ) STRICT;
+        CREATE TABLE IF NOT EXISTS work_policy (
+          work_id TEXT PRIMARY KEY REFERENCES work(id), content TEXT NOT NULL, checksum TEXT NOT NULL
+        ) STRICT; UPDATE meta SET value = '3' WHERE key = 'schemaVersion';`);
       });
     } catch (error) { this.db.close(); throw error; }
   }
@@ -75,6 +97,27 @@ export class Store {
     this.db.prepare('INSERT INTO work VALUES (?, ?, ?, ?, ?)').run(item.id, item.title, item.fromChapter, item.toChapter, item.status);
   }
   archiveWork(id: string): void { this.db.prepare("UPDATE work SET status = 'archived' WHERE id = ?").run(id); }
+  contracts(): AdoptedContract[] {
+    return (this.db.prepare('SELECT * FROM story_contract ORDER BY from_chapter, id').all() as { id: number; content: string; checksum: string }[]).map(row => {
+      if (hash(row.content) !== row.checksum) throw new Error('Adopted contract was modified; restore a valid checkpoint');
+      return { ...JSON.parse(row.content), id: row.id } as AdoptedContract;
+    });
+  }
+  adoptContract(contract: Omit<AdoptedContract, 'id'>): AdoptedContract {
+    const content = JSON.stringify(contract);
+    const result = this.db.prepare('INSERT INTO story_contract (from_chapter, content, checksum) VALUES (?, ?, ?)').run(contract.fromChapter, content, hash(content));
+    this.bump(); return { ...contract, id: Number(result.lastInsertRowid) };
+  }
+  policy(workId: string): WorkPolicy | undefined {
+    const row = this.db.prepare('SELECT content, checksum FROM work_policy WHERE work_id = ?').get(workId) as { content: string; checksum: string } | undefined;
+    if (!row) return undefined;
+    if (hash(row.content) !== row.checksum) throw new Error('Work policy was modified; restore a valid checkpoint');
+    return JSON.parse(row.content) as WorkPolicy;
+  }
+  setPolicy(policy: WorkPolicy): void {
+    const content = JSON.stringify(policy);
+    this.db.prepare('INSERT INTO work_policy VALUES (?, ?, ?) ON CONFLICT(work_id) DO UPDATE SET content = excluded.content, checksum = excluded.checksum').run(policy.workId, content, hash(content));
+  }
   revisions(): Revision[] {
     const rows = this.db.prepare(`SELECT r.*, c.stale FROM chapters c JOIN revisions r ON r.id = c.revision_id ORDER BY c.chapter`).all() as unknown as RevisionRow[];
     return rows.map(row => ({

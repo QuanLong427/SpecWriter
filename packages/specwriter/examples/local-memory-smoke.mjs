@@ -10,7 +10,7 @@ const [output, envFile, python] = process.argv.slice(2);
 if (!output || !envFile || !python || process.argv.length !== 5) throw new Error('Usage: node examples/local-memory-smoke.mjs NEW_BOOK_ROOT ENV_FILE GRAPHRAG_PYTHON');
 const root = resolve(output);
 if (existsSync(root)) throw new Error('Connection check requires a new output directory');
-initProject(root, 'Qwen + BGE-M3 connection check');
+initProject(root, 'Qwen + BGE-M3 connection check', { workflow: 'legacy' });
 const project = new Project(root);
 try {
   project.propose('connection-check', '连接验证', 1, 1);

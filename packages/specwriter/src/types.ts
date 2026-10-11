@@ -69,6 +69,7 @@ export interface ChapterReview {
   issues: { id: string; kind: 'continuity' | 'spec' | 'craft'; severity: 'blocking' | 'warning' | 'suggestion'; description: string; resolved: boolean; resolution?: string }[];
   notes: string[];
   critical_checks?: { claimHash: string; verdict: 'supported' | 'unsupported' | 'uncertain'; evidenceQuote: string; explanation: string }[];
+  intent_checks?: { id: string; verdict: 'satisfied' | 'uncertain' | 'violated'; evidenceQuotes: string[]; explanation: string }[];
   retrieval_check?: { assessmentHash: string; decision: 'use-formal-memory'; notes: string };
 }
 export interface Revision {
@@ -128,6 +129,29 @@ export interface ContextSource {
   revision?: number;
   protection: 'protected' | 'compressible';
 }
+export interface AdoptedContract {
+  id: number; fromChapter: number; reason: string; adoptedAt: string;
+  sources: { name: string; source: string; content: string; hash: string }[];
+}
+export interface ChapterIntent {
+  schemaVersion: 1; chapter: number; goal: string; scenes: string[];
+  participantIds: string[]; newEntities: { id: string; name: string; type: EntityInput['type'] }[];
+  pov: string | null; storyTime: string | null;
+  requiredState: { entity: string; fields: string[] }[];
+  requiredResources: { entity: string; resource: string }[];
+  requiredEvents: string[]; requiredHooks: string[];
+  knowledgeChecks: { holder: string; topic: string }[];
+  withhold: string[]; expectedChanges: string[]; targetChars: number | null; planPaths: string[];
+}
+export interface WorkPolicy {
+  schemaVersion: 1; workId: string; fromChapter: number; toChapter: number;
+  acceptance: 'draft' | 'auto'; reason: string; paused: boolean; pauseReason: string | null;
+  controlReason?: string;
+}
+export interface ContextRequirements {
+  factIds: string[]; entityIds: string[]; eventIds: string[]; hookIds: string[];
+  resourceKeys: string[]; knowledgeGaps: string[];
+}
 export interface ContextPackage {
   schemaVersion: 1;
   contractVersion?: 2;
@@ -146,6 +170,7 @@ export interface ContextPackage {
   retrieval?: { engine: 'writer-memory-graphrag' | 'microsoft-graphrag'; snapshotId: string; hops: number; seedIds: string[]; paths: GraphPath[]; status?: 'empty' | 'ready'; method?: GraphRagMethod; receiptId?: string; answerHash?: string; configHash?: string; outputHash?: string; answerTruncated?: boolean; assessment?: RetrievalAssessment };
   sources: ContextSource[];
   contextHash: string;
+  workflow?: { version: 1; contractId: number; intentDataHash: string; intent: ChapterIntent; requirements: ContextRequirements };
 }
 export interface WorkItem {
   id: string;
@@ -160,6 +185,7 @@ export interface BookConfig {
   name: string;
   language: 'zh' | 'en';
   contextBudgetChars: number;
+  workflow?: 'structured' | 'legacy';
   versioning?: { enabled: boolean; autoSave: boolean };
   memory?: { backend: 'microsoft-graphrag' | 'local'; method?: GraphRagMethod; autoIndex?: boolean; indexRetention?: number };
 }

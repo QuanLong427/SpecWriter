@@ -9,7 +9,7 @@ import { extraction, assessment } from './contract-fixture.mjs';
 const load = path => JSON.parse(readFileSync(path, 'utf8'));
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'specwriter-v05-'));
-  initProject(root, '井底的来信', { memoryBackend: 'local' });
+  initProject(root, '井底的来信', { memoryBackend: 'local', workflow: 'legacy' });
   const project = new Project(root); project.propose('opening', '开篇', 1, 4);
   t.after(() => {
     project.close();

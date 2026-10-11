@@ -97,7 +97,7 @@ test('restore detects manifest corruption before exposing a target and rejects u
 test('restore CLI works with a corrupt original live database and keeps the source intact', t => {
   const directory = mkdtempSync(join(tmpdir(), 'specwriter-damaged-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const root = join(directory, 'book'); initProject(root, '损坏恢复', { memoryBackend: 'local' });
+  const root = join(directory, 'book'); initProject(root, '损坏恢复', { memoryBackend: 'local', workflow: 'legacy' });
   const project = new Project(root); project.propose('arc', '开篇', 1, 1); project.sync();
   const versions = new BookVersions(root); versions.init(project);
   draft(project, root, 1, '林舟来到城门。'); project.commit(1, 'arc'); project.close();

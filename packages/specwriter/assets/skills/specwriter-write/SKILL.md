@@ -3,7 +3,7 @@ name: specwriter-write
 description: 在 SpecWriter 小说项目中继续写章节或执行已确定的章节计划，取回长期记忆，生成正文、候选事实及审阅结果。
 ---
 
-按 [项目协议](references/protocol.md) 恢复进度，选定当前工作包和下一章，运行 prepare。读取 context 中的约定、计划、带证据的记忆和必要历史原文，完善 intent 后运行 prepare --refresh，再写草稿。章纲是受校验的创作输入，修改后不能沿用旧上下文。
+按 [创作流程](references/workflow.md) 和 [项目协议](references/protocol.md) 运行 resume 恢复工作包。新工作流先 intent seed，完成 JSON、intent save，再 prepare；读取 context 的已采用约定、计划、带证据记忆和必要原文。改章纲须 save、prepare --refresh，不能沿用旧上下文。旧书没有 workflow 配置时保留 Markdown 章纲流程。
 
 连续写作按作者授权的章节范围执行，每章留下可阅读正文与审阅结果，收到作者新意见及时调整。模型问题先用 doctor --models 检查；只有明确需要实际连接探测时加 --probe，探测可能收费。GraphRAG 用量限制触发后读取 memory budget show，报告停止原因，保留已完成成果；不得为了继续写作自行清除限制或改为 unknown-usage allow。
 

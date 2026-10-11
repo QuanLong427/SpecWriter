@@ -80,7 +80,7 @@ function advance(project: Project, dataset: BenchmarkDataset, step: Step, versio
   }
 }
 function createBook(root: string, dataset: BenchmarkDataset) {
-  initProject(root, dataset.title, { memoryBackend: 'local' });
+  initProject(root, dataset.title, { memoryBackend: 'local', workflow: 'legacy' });
   const project = new Project(root);
   project.propose('benchmark-fixture', '实验夹具接纳与返修', 1, dataset.chapters.length); return project;
 }

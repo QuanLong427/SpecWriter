@@ -13,13 +13,24 @@ import { readJson } from './files.js';
 import { BookVersions } from './versions.js';
 import { runBenchmark, scoreBenchmark, type BenchmarkArm } from './benchmark.js';
 
-const help = `SpecWriter 0.7 — Codex fiction workflows + WriterMemory + local novel reader
+const help = `SpecWriter 0.8 — Codex fiction workflows + WriterMemory + local novel reader
 
 Usage: specwriter <command> [arguments] [--root PATH] [--json]
 
   init [PATH] --name TITLE [--backend microsoft-graphrag|local]
                                 Create a book; Microsoft GraphRAG is the default backend
   status                        Recover progress, drafts and memory freshness
+  resume [--work ID]             Recover next action from files without model calls
+  contract show                 Inspect adopted creative contracts and edited draft specs
+  contract adopt --reason TEXT [--from N]
+                                Adopt the author's selected specs from chapter N
+  work show ID                  Inspect scoped writing authorization
+  work authorize ID --from N --to N --acceptance draft|auto --reason TEXT
+                                Record the actual author instruction; auto permits chapter acceptance
+  work pause|resume ID --reason TEXT
+                                Pause advancement or record the author's resume instruction
+  intent seed|save|show N --work ID
+                                Seed/edit/validate structured intent before prepare
   propose ID --title TITLE --from N --to N
                                 Scaffold a scoped writing/revision work package
   prepare N --work ID [--query TEXT] [--budget CHARS] [--refresh]
@@ -87,7 +98,7 @@ Usage: specwriter <command> [arguments] [--root PATH] [--json]
                                 Generate a revision request from open annotations
   feedback resolve ID [--reopen] Mark an annotation handled, or reopen it
 
-Codex: $specwriter-explore / propose / write / review / revise / commit / archive
+Codex: $specwriter (entry) + $specwriter-explore / propose / write / review / revise / commit / archive
 Codex writes prose, extraction and review artifacts. Default prepare/query use Microsoft
 GraphRAG and call configured models for nonempty corpora; explicit local mode uses no model.
 `;
@@ -116,6 +127,7 @@ async function main(): Promise<void> {
   if (!command || command === 'help' || args.flags.has('help')) { process.stdout.write(help); return; }
   const allowed: Record<string, string[]> = {
     init: ['name', 'backend'], status: [], propose: ['title', 'from', 'to'], prepare: ['work', 'query', 'budget', 'refresh'],
+    resume: ['work'], contract: ['from', 'reason'], work: ['from', 'to', 'acceptance', 'reason'], intent: ['work'],
     hash: ['work'], verify: ['work'], commit: ['work'], memory: ['at', 'holder', 'limit', 'hops', 'python', 'model', 'embedding', 'env-file', 'credentials', 'provider', 'embedding-base', 'embedding-dimensions', 'reconfigure', 'preset', 'probe', 'method', 'backend', 'auto-index', 'retain', 'keep', 'rebuild', 'dry-run', 'prices', 'max-requests', 'max-tokens', 'max-cost', 'unknown-usage'], history: [], archive: [], sync: ['capture'], doctor: ['models', 'probe'],
     'review-requirements': ['work'], version: ['message', 'to', 'bundle', 'out'],
     benchmark: ['mode', 'dataset', 'out', 'provider', 'max-operations', 'arms', 'budget', 'method', 'run', 'ratings', 'prices'],
@@ -186,6 +198,28 @@ async function main(): Promise<void> {
   try {
     switch (command) {
       case 'status': count(0); print(project.status()); break;
+      case 'resume': count(0); print(project.resume(option('work'))); break;
+      case 'contract': {
+        count(1); const action = position(0, 'contract action');
+        if (!['show', 'adopt'].includes(action)) throw new Error('Contract action must be show or adopt');
+        for (const flag of args.flags.keys()) if (!['root', 'json', ...(action === 'adopt' ? ['reason', 'from'] : [])].includes(flag)) throw new Error(`Unsupported option --${flag} for contract ${action}`);
+        if (action === 'show') print(project.workflow.contracts());
+        else { const result = project.workflow.adopt(option('reason', true)!, option('from') === undefined ? undefined : positiveInteger(option('from'), 'from')); project.sync(); print(result); }
+        break;
+      }
+      case 'work': {
+        count(2); const action = position(0, 'work action'), id = position(1, 'work id');
+        if (!['show', 'authorize', 'pause', 'resume'].includes(action)) throw new Error('Work action must be show, authorize, pause or resume');
+        for (const flag of args.flags.keys()) if (!['root', 'json', ...(action === 'show' ? [] : action === 'authorize' ? ['from', 'to', 'acceptance', 'reason'] : ['reason'])].includes(flag)) throw new Error(`Unsupported option --${flag} for work ${action}`);
+        print(action === 'show' ? { work: project.store.work(id), policy: project.store.policy(id) ?? null } : action === 'authorize'
+          ? project.workflow.authorize(id, positiveInteger(option('from', true), 'from'), positiveInteger(option('to', true), 'to'), option('acceptance', true)! as 'draft' | 'auto', option('reason', true)!)
+          : project.workflow.pause(id, action === 'pause', option('reason', true)!)); break;
+      }
+      case 'intent': {
+        count(2); const action = position(0, 'intent action'), chapter = positiveInteger(position(1, 'chapter'), 'chapter'), work = option('work', true)!;
+        if (!['seed', 'save', 'show'].includes(action)) throw new Error('Intent action must be seed, save or show');
+        print(action === 'seed' ? project.workflow.seed(chapter, work) : action === 'save' ? project.workflow.saveIntent(chapter, work) : project.workflow.readIntent(chapter, work)); break;
+      }
       case 'propose': count(1); print(project.propose(position(0, 'work id'), option('title', true)!, positiveInteger(option('from', true), 'from'), positiveInteger(option('to', true), 'to'))); break;
       case 'prepare': count(1); print(await new WriterMemory(project).prepare(positiveInteger(position(0, 'chapter'), 'chapter'), option('work', true)!, { ...memoryOptions, query: option('query'), budget: option('budget') === undefined ? undefined : positiveInteger(option('budget'), 'budget'), refresh: args.flags.has('refresh') })); break;
       case 'hash': count(1); print(project.hashes(positiveInteger(position(0, 'chapter'), 'chapter'), option('work', true)!)); break;

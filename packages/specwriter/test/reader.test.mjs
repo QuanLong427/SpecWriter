@@ -13,7 +13,7 @@ const load = path => JSON.parse(readFileSync(path, 'utf8'));
 const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'specwriter-reader-test-'));
-  initProject(root, '废井来信', { memoryBackend: 'local' });
+  initProject(root, '废井来信', { memoryBackend: 'local', workflow: 'legacy' });
   const project = new Project(root); project.propose('opening', '开篇两章', 1, 2);
   t.after(() => { project.close(); rmSync(root, { recursive: true, force: true }); });
   return { root, project, reader: new NovelReader(project) };

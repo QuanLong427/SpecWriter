@@ -19,6 +19,7 @@ export class WriterMemory {
     let snapshotId: string | undefined;
     if (request.backend === 'microsoft-graphrag' && request.atChapter > 0) {
       if (request.autoIndex) await this.provider.index(request.atChapter, { reuse: true, signal: options.signal, onProgress: options.onProgress });
+      if (this.project.prepareRequest(chapter, workId, options).token !== request.token) throw new Error('Book or authorization changed during GraphRAG indexing; retry prepare');
       snapshotId = (await this.provider.query(request.query, { at: request.atChapter, method: request.method, cache: true, signal: options.signal })).snapshotId;
     }
     options.signal?.throwIfAborted();
