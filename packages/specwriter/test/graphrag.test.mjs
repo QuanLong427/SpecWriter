@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { Project, initProject, MicrosoftGraphRag, runGraphRag } from '../dist/index.js';
+import { extraction, assessment } from './contract-fixture.mjs';
 
 const load = path => JSON.parse(readFileSync(path, 'utf8'));
 const fact = (subject, predicate, object, quote, scope = 'world', holder = null) => ({ subject, predicate, object, scope, holder, evidence: { quote } });
@@ -29,8 +30,8 @@ function candidate(project, root, chapter, body, changes = {}, options = {}) {
   const paths = Object.fromEntries(Object.entries(prepared.paths).map(([key, value]) => [key, join(root, value)]));
   writeFileSync(paths.draft, body);
   const metadata = project.hashes(chapter, 'opening');
-  writeFileSync(paths.delta, JSON.stringify({ ...load(paths.delta), ...metadata, title: `第${chapter}章`, summary: body, characters: ['林舟'], key_events: [{ description: body, evidence: { quote: body } }], ...changes }));
-  writeFileSync(paths.review, JSON.stringify({ ...load(paths.review), chapter, contextHash: metadata.contextHash, draftHash: metadata.draftHash, reviewed: true }));
+  writeFileSync(paths.delta, JSON.stringify(extraction({ ...load(paths.delta), ...metadata, title: `第${chapter}章`, summary: body, characters: ['林舟'], key_events: [{ description: body, evidence: { quote: body } }], ...changes }, body)));
+  writeFileSync(paths.review, JSON.stringify(assessment(load(paths.review), metadata)));
   return paths;
 }
 function accept(project, root, chapter, body, changes = {}) {
@@ -164,14 +165,18 @@ function fakeRunner(calls, behavior = {}) {
       writeFileSync(join(root, 'prompts/extract.txt'), 'Extract evidence');
       writeFileSync(join(root, 'settings.yaml'), 'completion_models: {}\nembedding_models: {}\ninput_storage:\n  base_dir: dangerous-shared-input\nvector_store:\n  db_uri: dangerous-shared-vectors\n  vector_size: 1024\n');
       writeFileSync(join(root, '.env'), 'GRAPHRAG_API_KEY=test-placeholder\n');
-    } else if (args[2] === 'index') {
+    } else if (args[2] === 'index' || args[2] === 'update') {
       if (behavior.failIndex) throw new Error('Provider failed');
       mkdirSync(join(root, 'output/lancedb'), { recursive: true });
-      for (const name of ['documents', 'text_units', 'entities', 'relationships', 'communities', 'community_reports']) writeFileSync(join(root, `output/${name}.parquet`), 'test output');
+      for (const name of ['documents', 'text_units', 'entities', 'relationships', 'communities', 'community_reports']) writeFileSync(join(root, `output/${name}.parquet`), `test output ${args[2]}`);
+      writeFileSync(join(root, 'output/lancedb/vectors.bin'), `vectors ${args[2]}`);
+      if (behavior.afterIndex) behavior.afterIndex(args[2], root);
       if (behavior.duringIndex) behavior.duringIndex();
     } else if (args[2] === 'query') {
       if (behavior.duringQuery) behavior.duringQuery();
-      return { stdout: '有来源的模型回答', stderr: '' };
+      return { stdout: behavior.answer ?? '有来源的模型回答', stderr: '' };
+    } else if (args[0] === '-X') {
+      return { stdout: JSON.stringify(behavior.citations ?? { sources: [], unresolvedCitations: [] }), stderr: '' };
     }
     return { stdout: '', stderr: '' };
   };
@@ -192,6 +197,163 @@ test('external corpus export contains only accepted prefix prose and detects add
   rmSync(join(exported.root, 'input/0002.txt'));
   writeFileSync(join(exported.root, 'input/0001.txt'), '篡改的正文');
   assert.throws(() => provider.export(1), /modified/);
+});
+
+test('incremental indexes clone a verified strict prefix and preserve parent vectors and old answers', async t => {
+  const { root, project } = fixture(t);
+  accept(project, root, 1, '林舟发现钥匙。');
+  const calls = [], phases = [];
+  const provider = new MicrosoftGraphRag(project, fakeRunner(calls));
+  await provider.setup({ python: 'python', model: 'chat', embedding: 'embedding' });
+  const first = await provider.index(1);
+  const original = readFileSync(join(first.directory, 'output/lancedb/vectors.bin'), 'utf8');
+  const answer = await provider.query('钥匙', { at: 1, cache: true });
+  accept(project, root, 2, '白衡在第二章揭示未来秘密。');
+  const second = await provider.index(2, { onProgress: item => phases.push(item.phase) });
+  assert.equal(second.indexing.mode, 'incremental');
+  assert.equal(second.indexing.addedChapters, 1);
+  assert.equal(second.indexing.parentSnapshotId, first.snapshotId);
+  assert.deepEqual(phases, ['starting', 'cloning', 'indexing', 'ready']);
+  assert.equal(calls.filter(call => call.args[2] === 'index').length, 1);
+  assert.equal(calls.filter(call => call.args[2] === 'update').length, 1);
+  assert.equal(readFileSync(join(first.directory, 'output/lancedb/vectors.bin'), 'utf8'), original);
+  assert.equal(readFileSync(join(second.directory, 'output/lancedb/vectors.bin'), 'utf8'), 'vectors update');
+  assert.deepEqual(readdirSync(join(first.directory, 'input')), ['0001.txt']);
+  assert.equal((await provider.query('钥匙', { at: 1, cache: true })).id, answer.id);
+  assert.equal((await provider.index(2, { reuse: true })).reused, true);
+  candidate(project, root, 1, '林舟从未见过钥匙。', {}, { refresh: true }); project.commit(1, 'opening');
+  const replacement = await provider.index(1);
+  assert.equal(replacement.indexing.mode, 'standard');
+  assert.equal(replacement.indexing.parentSnapshotId, undefined);
+  assert.equal(provider.inspect(1).ready, true);
+});
+
+test('configuration rebuild, failed update retry and cancelled subprocesses cannot leave false readiness', async t => {
+  const { root, project } = fixture(t);
+  accept(project, root, 1, '林舟发现钥匙。');
+  const behavior = {}, calls = [], provider = new MicrosoftGraphRag(project, fakeRunner(calls, behavior));
+  await provider.setup({ python: 'python', model: 'chat', embedding: 'embedding' });
+  const first = await provider.index(1);
+  const settings = join(root, '.specwriter/graphrag/provider/settings.yaml');
+  writeFileSync(settings, readFileSync(settings, 'utf8') + 'concurrent_requests: 7\n');
+  assert.equal(provider.inspect(1).ready, false);
+  assert.equal(provider.inspect(1).readyMarker, true);
+  await assert.rejects(provider.index(1, { reuse: true }), /changed or is incompatible/);
+  await provider.index(1, { rebuild: true });
+  accept(project, root, 2, '林舟找到石门。');
+  behavior.failIndex = true;
+  await assert.rejects(provider.index(2), /Provider failed/);
+  assert.equal(provider.inspect(2).job.phase, 'failed');
+  assert.equal(provider.inspect(2).busy, false);
+  behavior.failIndex = false;
+  assert.equal((await provider.index(2)).indexing.mode, 'incremental');
+  const controller = new AbortController(); controller.abort();
+  const before = calls.length;
+  await assert.rejects(provider.index(2, { reuse: true, signal: controller.signal }), /abort/i);
+  assert.equal(calls.length, before);
+  const running = new AbortController();
+  const child = runGraphRag(process.execPath, ['-e', 'setInterval(()=>{},1000)'], root, { signal: running.signal });
+  setTimeout(() => running.abort(), 100);
+  await assert.rejects(child, /cancelled/);
+  await assert.rejects(runGraphRag(process.execPath, ['-e', 'setInterval(()=>{},1000)'], root, { timeoutMs: 100 }), /timed out/);
+  assert.ok(existsSync(join(first.directory, 'ready.json')));
+});
+
+test('pruning preserves prepared indexes, receipts and prose; evicted indexes rebuild from canonical chapters', async t => {
+  const { root, project } = fixture(t);
+  const calls = [], provider = new MicrosoftGraphRag(project, fakeRunner(calls));
+  await provider.setup({ python: 'python', model: 'chat', embedding: 'embedding' });
+  const indexed = [], receipts = [];
+  for (let chapter = 1; chapter <= 3; chapter++) {
+    accept(project, root, chapter, `林舟完成第${chapter}步探索。`);
+    indexed.push(await provider.index(chapter));
+    receipts.push(await provider.query('林舟', { at: chapter, cache: true }));
+  }
+  const dry = await provider.prune({ keep: 1, dryRun: true });
+  assert.deepEqual(new Set(dry.evicted), new Set(indexed.slice(0, 2).map(item => item.snapshotId)));
+  assert.equal(provider.inspect(1).ready, true);
+  // Bind a pending chapter to the first receipt while keeping Microsoft query entirely model-free.
+  const configPath = join(root, 'specwriter/config.yaml');
+  const oldConfig = readFileSync(configPath, 'utf8');
+  writeFileSync(configPath, oldConfig.replace('backend: local', 'backend: microsoft-graphrag'));
+  const prepared = project.prepare(2, 'opening', { query: '林舟', refresh: true });
+  assert.equal(load(join(root, prepared.paths.context)).retrieval.snapshotId, indexed[0].snapshotId);
+  const result = await provider.prune({ keep: 1 });
+  assert.deepEqual(result.evicted, [indexed[1].snapshotId]);
+  assert.equal(provider.inspect(1).ready, true);
+  assert.equal(provider.inspect(2).evicted, true);
+  assert.equal(project.memory().atChapter, 3);
+  assert.ok(existsSync(join(indexed[1].directory, 'queries', `${receipts[1].id}.json`)));
+  assert.ok(!existsSync(join(indexed[1].directory, 'input')));
+  const rebuilt = await provider.index(2);
+  assert.equal(rebuilt.indexing.parentSnapshotId, indexed[0].snapshotId);
+  assert.equal(provider.inspect(2).evicted, false);
+  writeFileSync(configPath, oldConfig);
+  assert.equal(project.doctor().healthy, true);
+});
+
+test('lock recovery refuses a running owner and only removes a confirmed dead owner', t => {
+  const { root, project } = fixture(t);
+  accept(project, root, 1, '林舟发现钥匙。');
+  const provider = new MicrosoftGraphRag(project), exported = provider.export(1);
+  const path = join(exported.root, '.specwriter-operation.lock');
+  writeFileSync(path, JSON.stringify({ pid: process.pid }));
+  assert.throws(() => provider.recover(1), /still running/);
+  assert.ok(existsSync(path));
+  let dead = 999999;
+  for (; dead > 1; dead--) { try { process.kill(dead, 0); } catch (error) { if (error.code === 'ESRCH') break; } }
+  assert.ok(dead > 1);
+  writeFileSync(path, JSON.stringify({ pid: dead, childPid: process.pid }));
+  assert.throws(() => provider.recover(1), /worker is still running/);
+  assert.ok(existsSync(path));
+  writeFileSync(path, JSON.stringify({ pid: dead }));
+  assert.equal(provider.recover(1).recovered, true);
+  assert.equal(provider.recover(1).recovered, false);
+});
+
+test('cancelling a real index worker records its PID and releases the lock only after exit', async t => {
+  const { root, project } = fixture(t);
+  accept(project, root, 1, '林舟发现钥匙。');
+  const controller = new AbortController(), calls = [];
+  const base = fakeRunner(calls);
+  let workerPid;
+  const runner = async (executable, args, cwd, options) => {
+    if (args[2] !== 'index') return base(executable, args, cwd, options);
+    return runGraphRag(process.execPath, ['-e', 'setInterval(()=>{},1000)'], cwd, { ...options, onSpawn: pid => {
+      options.onSpawn(pid); workerPid = pid;
+      assert.equal(load(join(cwd, '.specwriter-operation.lock')).childPid, pid);
+      controller.abort();
+    } });
+  };
+  const provider = new MicrosoftGraphRag(project, runner);
+  await provider.setup({ python: 'python', model: 'chat', embedding: 'embedding' });
+  await assert.rejects(provider.index(1, { signal: controller.signal }), /cancelled/);
+  assert.ok(workerPid > 0);
+  assert.throws(() => process.kill(workerPid, 0), error => error.code === 'ESRCH');
+  const status = provider.inspect(1);
+  assert.equal(status.busy, false); assert.equal(status.ready, false); assert.equal(status.job.phase, 'failed');
+});
+
+test('Microsoft citations map only to exact accepted prefix revisions and become context evidence', async t => {
+  const { root, project } = fixture(t);
+  const body = '林舟发现钥匙。'; accept(project, root, 1, body);
+  const calls = [], behavior = { answer: '钥匙来自废井。[Data: Entities (1); Sources (999)]' };
+  const provider = new MicrosoftGraphRag(project, fakeRunner(calls, behavior));
+  await provider.setup({ python: 'python', model: 'chat', embedding: 'embedding' });
+  await provider.index(1);
+  const doc = project.corpus(1).documents[0];
+  behavior.citations = { sources: [{ citationType: 'entities', citationId: '1', chapter: 1, revision: doc.revision, bodyHash: doc.bodyHash, excerpt: body }], unresolvedCitations: [{ citationType: 'text_units', citationId: '999' }] };
+  const answer = await provider.query('林舟', { at: 1, cache: true });
+  assert.equal(answer.sources[0].bodyHash, doc.bodyHash);
+  assert.equal(answer.unresolvedCitations.length, 1);
+  assert.deepEqual(provider.cachedQuery('林舟', { at: 1 }).sources, answer.sources);
+  const configPath = join(root, 'specwriter/config.yaml');
+  writeFileSync(configPath, readFileSync(configPath, 'utf8').replace('backend: local', 'backend: microsoft-graphrag'));
+  const prepared = project.prepare(2, 'opening', { query: '林舟' });
+  assert.ok(load(join(root, prepared.paths.context)).sources.some(item => item.kind === 'prose' && item.chapter === 1 && item.content === body));
+  behavior.citations.sources[0].chapter = 2;
+  await assert.rejects(provider.query('未来', { at: 1 }), /does not match accepted prefix/);
+  assert.ok(!readdirSync(join(provider.export(1).root, 'queries')).some(name => name.endsWith('.answer.txt')));
 });
 
 test('Microsoft adapter uses isolated storage and positional CLI queries; answers stay advisory', async t => {

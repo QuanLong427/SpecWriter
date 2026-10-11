@@ -16,6 +16,11 @@ export interface ReaderFeedback {
   revision: number | null; bodyHash: string; quote: string; start: number; end: number;
   note: string; createdAt: string; status: 'open' | 'resolved'; resolvedAt?: string;
 }
+export interface ReaderPreferences {
+  schemaVersion: 1;
+  settings?: { font: number; leading: number; theme: 'light' | 'dark' };
+  positions: Record<string, { key: string; ratio: number; bodyHash: string }>;
+}
 export const escapeHtml = (text: string): string => text.replace(/[&<>"']/g, value => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[value]!));
 const count = (body: string): number => Array.from(body.replace(/\s/g, '')).length;
 const chapterLabel = (chapter: number, title: string): string => /^第[一二三四五六七八九十百千万零〇\d\s]+章/.test(title) ? title : `第 ${chapter} 章　${title}`;
@@ -48,7 +53,7 @@ export class NovelReader {
     } else {
       chapters = revisions.map(item => this.acceptedEntry(item, trusted.length));
     }
-    return { name: loadConfig(this.project.root).name, bookId: hash(this.project.root).slice(0, 20), generation: this.project.store.generation(),
+    return { name: loadConfig(this.project.root).name, bookId: loadConfig(this.project.root).bookId ?? hash(this.project.root).slice(0, 20), generation: this.project.store.generation(),
       scope: scope.draft ? 'draft' : 'accepted', workId: scope.work ?? null, trustedThrough: trusted.length,
       chapters, works, characters: chapters.reduce((sum, chapter) => sum + chapter.characters, 0) };
   }
@@ -87,6 +92,37 @@ export class NovelReader {
     if (!row) throw new Error('Chapter revision does not exist');
     if (hash(row.body) !== row.bodyHash) throw new Error('Stored prose hash mismatch');
     return row;
+  }
+  preferences(): ReaderPreferences {
+    const path = safePath(this.project.root, '.specwriter', 'reader', 'preferences.json');
+    const result: ReaderPreferences = existsSync(path) ? readJson(path) : { schemaVersion: 1, positions: {} };
+    if (result.schemaVersion !== 1) throw new Error('Unsupported reader preferences');
+    this.validatePreferences({ ...(result.settings ? { settings: result.settings } : {}), positions: result.positions });
+    return result;
+  }
+  private validatePreferences(patch: Partial<Omit<ReaderPreferences, 'schemaVersion'>>) {
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch) || Object.keys(patch).some(key => !['settings', 'positions'].includes(key))) throw new Error('Invalid reader preferences fields');
+    if (patch.settings !== undefined) {
+      const item = patch.settings;
+      if (!item || Object.keys(item).some(key => !['font', 'leading', 'theme'].includes(key)) || !Number.isInteger(item.font) || item.font < 16 || item.font > 28 || ![1.95, 2.35].includes(item.leading) || !['light', 'dark'].includes(item.theme)) throw new Error('Invalid reader settings');
+    }
+    if (patch.positions !== undefined) {
+      if (!patch.positions || typeof patch.positions !== 'object' || Array.isArray(patch.positions) || Object.keys(patch.positions).length > 256) throw new Error('Invalid reading positions');
+      for (const [scope, item] of Object.entries(patch.positions)) {
+        const work = scope === 'accepted' ? null : /^draft:([a-z][a-z0-9-]{0,63})$/.exec(scope)?.[1];
+        if (work === undefined || !item || Object.keys(item).some(key => !['key', 'ratio', 'bodyHash'].includes(key)) || !Number.isFinite(item.ratio) || item.ratio < 0 || item.ratio > 1 || !/^[a-f0-9]{64}$/.test(item.bodyHash) || (work === null ? !/^accepted:[1-9]\d*$/.test(item.key) : !new RegExp(`^draft:${identifier(work)}:[1-9]\\d*$`).test(item.key))) throw new Error('Invalid reading position');
+      }
+    }
+  }
+  savePreferences(patch: Partial<Omit<ReaderPreferences, 'schemaVersion'>>) {
+    this.validatePreferences(patch);
+    return this.snapshot(() => {
+      const previous = this.preferences();
+      const result = { ...previous, ...patch, positions: { ...previous.positions, ...patch.positions } };
+      this.validatePreferences(result.settings ? { settings: result.settings, positions: result.positions } : { positions: result.positions });
+      atomicWrite(safePath(this.project.root, '.specwriter', 'reader', 'preferences.json'), json(result));
+      return result;
+    });
   }
   private feedbackPath(id: string) { return safePath(this.project.root, 'specwriter', 'feedback', `${feedbackId(id)}.json`); }
   feedback(chapterKey?: string) {

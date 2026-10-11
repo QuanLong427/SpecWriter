@@ -7,11 +7,12 @@
   "additionalProperties": false,
   "required": ["schemaVersion", "chapter", "baseRevision", "contextHash", "draftHash", "title", "summary", "characters", "key_events", "timeline_events", "foreshadow_updates", "relationship_changes", "state_changes", "cast_intros", "facts"],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "enum": [1, 2] },
     "chapter": { "type": "integer", "minimum": 1 },
     "baseRevision": { "type": ["integer", "null"], "minimum": 1 },
     "contextHash": { "$ref": "#/$defs/hash" },
     "draftHash": { "$ref": "#/$defs/hash" },
+    "intentHash": { "$ref": "#/$defs/hash" },
     "title": { "$ref": "#/$defs/text" },
     "summary": { "$ref": "#/$defs/text" },
     "characters": { "type": "array", "items": { "$ref": "#/$defs/text" }, "uniqueItems": true },
@@ -128,13 +129,19 @@
       }
     }
   },
+  "allOf": [{ "if": { "properties": { "schemaVersion": { "const": 2 } } }, "then": { "properties": { "intentHash": { "$ref": "#/$defs/hash" } }, "required": ["intentHash"] } }],
   "$defs": {
     "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
     "text": { "type": "string", "minLength": 1, "pattern": "\\S" },
     "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "evidence": {
       "type": "object", "additionalProperties": false, "required": ["quote"],
-      "properties": { "quote": { "$ref": "#/$defs/text" } }
+      "properties": {
+        "quote": { "$ref": "#/$defs/text" },
+        "basis": { "enum": ["established", "reported", "inferred", "imagined"] },
+        "start": { "type": "integer", "minimum": 0 }, "end": { "type": "integer", "minimum": 0 }
+      },
+      "dependencies": { "start": ["end"], "end": ["start"] }
     }
   }
 }

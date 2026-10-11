@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import { parse, parseDocument, stringify } from 'yaml';
 import { assetsRoot, atomicWrite, hash, json, readJson, safePath, schemasRoot, writeNew } from './files.js';
 import { Store } from './store.js';
@@ -14,12 +15,15 @@ export function loadConfig(root: string): BookConfig {
     throw new Error('Invalid specwriter/config.yaml');
   }
   if (config.memory !== undefined && (!config.memory || !['microsoft-graphrag', 'local'].includes(config.memory.backend) || (config.memory.method !== undefined && !['local', 'global', 'drift', 'basic'].includes(config.memory.method)) || (config.memory.autoIndex !== undefined && typeof config.memory.autoIndex !== 'boolean'))) throw new Error('Invalid memory configuration in specwriter/config.yaml');
-  return { ...config, memory: { backend: config.memory?.backend ?? 'microsoft-graphrag', method: config.memory?.method ?? 'local', autoIndex: config.memory?.autoIndex ?? true } };
+  if (config.bookId !== undefined && (typeof config.bookId !== 'string' || !/^[a-f0-9-]{36}$/.test(config.bookId))) throw new Error('Invalid bookId in specwriter/config.yaml');
+  if (config.memory?.indexRetention !== undefined && (!Number.isSafeInteger(config.memory.indexRetention) || config.memory.indexRetention < 0)) throw new Error('Invalid indexRetention in specwriter/config.yaml');
+  return { ...config, memory: { backend: config.memory?.backend ?? 'microsoft-graphrag', method: config.memory?.method ?? 'local', autoIndex: config.memory?.autoIndex ?? true, indexRetention: config.memory?.indexRetention ?? 2 } };
 }
 export const defaultMemoryQuery = '梳理已发生事件、人物关系、当前状态、人物认知与未兑现伏笔，为下一章续写提供有来源的记忆依据。';
 export function configureMemory(root: string, patch: NonNullable<BookConfig['memory']>) {
   if (!['microsoft-graphrag', 'local'].includes(patch.backend) || (patch.method !== undefined && !['local', 'global', 'drift', 'basic'].includes(patch.method)) || (patch.autoIndex !== undefined && typeof patch.autoIndex !== 'boolean')) throw new Error('Invalid memory backend, method or autoIndex');
   const config = loadConfig(root);
+  if (patch.indexRetention !== undefined && (!Number.isSafeInteger(patch.indexRetention) || patch.indexRetention < 0)) throw new Error('Invalid indexRetention');
   const path = safePath(root, 'specwriter', 'config.yaml');
   const document = parseDocument(readFileSync(path, 'utf8'));
   const provided = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined));
@@ -40,7 +44,7 @@ export function initProject(rootPath: string, name = '未命名小说', options:
   const root = resolve(rootPath);
   mkdirSync(root, { recursive: true });
   if (options.memoryBackend !== undefined && !['microsoft-graphrag', 'local'].includes(options.memoryBackend)) throw new Error('memoryBackend must be microsoft-graphrag or local');
-  writeNew(safePath(root, 'specwriter', 'config.yaml'), stringify({ schemaVersion: 1, name, language: 'zh', contextBudgetChars: 30000, memory: { backend: options.memoryBackend ?? 'microsoft-graphrag', method: 'local', autoIndex: true } }));
+  writeNew(safePath(root, 'specwriter', 'config.yaml'), stringify({ schemaVersion: 1, bookId: randomUUID(), name, language: 'zh', contextBudgetChars: 30000, memory: { backend: options.memoryBackend ?? 'microsoft-graphrag', method: 'local', autoIndex: true } }));
   loadConfig(root);
   for (const name of ['premise', 'world', 'characters', 'style']) {
     writeNew(safePath(root, 'specwriter', 'specs', `${name}.md`), readFileSync(join(assetsRoot, 'templates', `${name}.md`), 'utf8'));
@@ -70,6 +74,7 @@ export function initProject(rootPath: string, name = '未命名小说', options:
     managed(`${skillPath}/SKILL.md`, readFileSync(join(assetsRoot, 'skills', entry.name, 'SKILL.md'), 'utf8'));
     managed(`${skillPath}/references/protocol.md`, readFileSync(join(assetsRoot, 'protocol.md'), 'utf8'));
     managed(`${skillPath}/references/memory.md`, readFileSync(join(assetsRoot, 'memory.md'), 'utf8'));
+    managed(`${skillPath}/references/benchmark.md`, readFileSync(join(assetsRoot, 'benchmark.md'), 'utf8'));
     managed(`${skillPath}/references/reader.md`, readFileSync(join(assetsRoot, 'reader.md'), 'utf8'));
     for (const schema of ['chapter-delta.schema.json', 'review.schema.json']) managed(`${skillPath}/references/${schema}`, readFileSync(join(schemasRoot, schema), 'utf8'));
     managed(`${skillPath}/references/THIRD_PARTY_NOTICES.md`, readFileSync(join(packageRoot, 'THIRD_PARTY_NOTICES.md'), 'utf8'));

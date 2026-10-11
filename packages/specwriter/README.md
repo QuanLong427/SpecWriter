@@ -42,7 +42,7 @@ node .specwriter/bin/specwriter.mjs propose opening --title "开篇三章" --fro
 node .specwriter/bin/specwriter.mjs prepare 1 --work opening --query "林舟、废井、青铜钥匙"
 ```
 
-prepare 返回 intent、context、draft、delta、review 路径。Codex 完成正文、事实提取和审阅；`hash 1 --work opening` 提供当前哈希供新提取结果使用，随后：
+prepare 返回 intent、context、draft、delta、review 路径。Codex 完善章纲后先 `prepare 1 --work opening --refresh`，再完成正文、事实提取和审阅；`hash 1 --work opening` 提供正文、上下文和 intentHash。版本 2 契约要求证据 basis 和证据/遗漏/连续性三项有依据的审阅检查，修改章纲也会使旧候选失效。随后：
 
 ```powershell
 node .specwriter/bin/specwriter.mjs verify 1 --work opening
@@ -76,7 +76,7 @@ CLI 默认输出 JSON；`--json` 还会将错误格式化为 JSON（写到 stder
 
 默认 prepare 使用 Microsoft GraphRAG 的查询结果，并保留正式事实、近期人物和两跳结构关系作为状态依据。检索回答以 kind=retrieval 写入 context；记录前缀/索引版本、receiptId 与回答哈希，verify/commit 复用并校验同一记录，不再次调用模型。预算按字符计算，不冒充模型 token，长回答明确截取；未选入上下文的正式记忆仍留在数据库中。原文索引使用 SQLite FTS5/BM25；`memory rebuild` 重建全文与本地图缓存，Microsoft 索引单独校验/建立。`memory query --backend local --hops` 支持 1–4 跳，`--holder` 额外限定角色 belief；world 与原文仍为作者视角。
 
-记录契约参考 ainovel-cli 的章节事实体系与 InkOS 的正文证据状态投影，新增可选 `entities`、`narrative_events`、`resource_changes` 以及伏笔依赖和替代字段。旧 delta 仍可重放，数据库自动迁移到 schema 2。实体有稳定 ID 和别名，事件有参与者、地点、因果，资源核对期初与期末。完整字段规则见 [记忆协议](assets/memory.md)。
+记录契约参考 ainovel-cli 的章节事实体系与 InkOS 的正文证据状态投影，包含 `entities`、`narrative_events`、`resource_changes` 以及伏笔依赖和替代字段。已接纳的旧 delta 仍可重放，数据库版本保持 2，新提取和审阅使用契约版本 2。已登记人物的名称/别名解析到稳定 ID，统一位置、关系、资源和 holder；同名冲突要求明确 ID。传闻、推测和想象使用 belief，不能建立世界真相。完整字段规则见 [记忆协议](assets/memory.md)。
 
 ## 默认 Microsoft GraphRAG
 
@@ -94,7 +94,16 @@ node .specwriter/bin/specwriter.mjs prepare 13 --work middle-arc --query "林舟
 node .specwriter/bin/specwriter.mjs memory query "这一卷有哪些未兑现的承诺？" --at 12 --method global
 ```
 
-默认配置为 `memory: { backend: microsoft-graphrag, method: local, autoIndex: true }`。已有且校验通过的索引及同一查询回答会复用，首次使用新前缀会建立索引。运行 `memory configure --backend microsoft-graphrag --auto-index false` 可关闭自动索引，之后需手工 `memory graphrag index --at N`。
+默认配置为 `memory: { backend: microsoft-graphrag, method: local, autoIndex: true, indexRetention: 2 }`。已有索引与同一查询回答会复用，新前缀从版本/配置一致的较早前缀复制索引，调用官方 update 增量提取；无有效父索引时全量建立。全文加载、向量复制和社区合并仍有成本。默认保留当前版本链最近 2 个索引及待写章节依赖，可用 `memory configure --backend microsoft-graphrag --retain 0` 关闭自动清理。关闭自动索引用 `--auto-index false`，之后需手工 index。
+
+```powershell
+node .specwriter/bin/specwriter.mjs memory graphrag status --at 12
+node .specwriter/bin/specwriter.mjs memory graphrag recover --at 12
+node .specwriter/bin/specwriter.mjs memory graphrag index --at 12 --rebuild
+node .specwriter/bin/specwriter.mjs memory graphrag prune --keep 2 --dry-run
+```
+
+status 校验就绪状态并展示阶段；recover 只移除已停止进程的锁。进度写到 stderr，Ctrl+C 取消操作，失败重试清除未完成派生文件。prune 清理索引、保留正文与查询记录，被清理的历史前缀再次使用需重新索引。查询引用从 parquet 追溯到正文版本和逐字片段；无法映射的引用明确列出，语义仍需核对。
 
 每个前缀/版本使用独立语料、缓存、LanceDB 和社区报告；只有指定边界内的已接纳原文进入索引。后续章节不影响已有旧章前缀；旧章重写生成新快照，下次准备自动索引。校验输入、配置、提示词与索引产物，拒绝过期或未完成索引。回答标记 advisory，不自动成为正式事实。详细安装、恢复和约束见 [记忆协议](assets/memory.md)，模式参数见 [官方 CLI](https://microsoft.github.io/graphrag/cli/)。
 
@@ -106,6 +115,10 @@ TypeScript 默认入口是异步 `new WriterMemory(project).prepare/query`；同
 
 接纳正文与事实在同一 SQLite 事务中完成。文件投影在事务之后生成；若 commit 返回 `projectionNeedsSync: true`，数据库已经接纳，用 sync 恢复文件，不要再次提交。archive 关闭已完成工作包，不把计划变为事实；原工作目录保留，归档快照不会随后续修订改写。
 
+## 记忆实验与用量
+
+运行 `specwriter benchmark run` 可在独立目录比较全量建库、缓存、增量更新和结构化检索。默认离线，不调用模型；真实实验需要显式 `--mode live --provider 小说根目录 --max-operations N`。`memory usage` 报告 GraphRAG 请求用量，缺失数据保留未知，`--prices FILE` 使用用户提供的单价估算费用。详见 [实验与评分说明](assets/benchmark.md)。
+
 ## 小说阅读、批注与交付
 
 在小说目录运行：
@@ -116,7 +129,7 @@ node .specwriter/bin/specwriter.mjs read --draft --work opening
 node .specwriter/bin/specwriter.mjs export --format html
 ```
 
-read 自动打开浏览器；服务仅绑定本机，Ctrl+C 停止。目录支持正式/草稿切换、连续阅读、阅读进度、字号、行距、夜间主题、版本对照和段落批注。Codex 写完后刷新正文即可看到新内容，不要求 GraphRAG 或模型凭据。
+read 自动打开浏览器；服务仅绑定本机，Ctrl+C 停止。目录支持正式/草稿切换、连续阅读、阅读进度、字号、行距、夜间主题、版本对照和段落批注。偏好与各范围进度存于 `.specwriter/reader/preferences.json`，服务重启、随机端口改变后可恢复；正文改动后不沿用旧滚动偏移。Codex 写完后刷新正文即可看到新内容，不要求 GraphRAG 或模型凭据。
 
 批注绑定正文版本与精确引用。按“复制给 Codex”粘贴修订请求，或直接让 Codex 使用 feedback list 读取意见；原文改变时旧批注标为过期。阅读器与 CLI 均可导出 TXT/Markdown/独立 HTML 到 exports/，只包含连续有效的正式章节；草稿与需要重审的后续章节排除。详见 [阅读协议](assets/reader.md)。现有小说重新运行 init 会安装新的阅读协议和更新未被作者改写的 Skills，保留正文与创作约定。
 
@@ -126,14 +139,19 @@ read 自动打开浏览器；服务仅绑定本机，Ctrl+C 停止。目录支�
 npm test
 npm run check
 npm run demo
+npm run demo:long
 npm run reader:demo
 ```
 
 demo 使用内置示例正文，不调用 AI，并输出一个可检查的临时小说项目路径。
 
+demo:long 验证 24 章人物别名、资源、因果、伏笔推进/兑现，第 5 章返修后逐章协调、批注、阅读偏好与正式导出。共 44 次接纳，不调用模型；这是工作流样本，不是百万字或文学质量基准。
+
 reader:demo 生成有两章正式正文、一章草稿和示例批注的临时小说，打印本地阅读地址，不调用模型；打开地址预览，Ctrl+C 停止服务。
 
-可选兼容检查：`node packages/specwriter/examples/graphrag-smoke.mjs PATH/TO/PYTHON` 使用官方 GraphRAG 3.3.0 执行 init、离线配置 dry-run 和 query 帮助检查。它关闭模型连接验证，不执行真实索引/模型查询；完整问答需要有效供应商凭据。
+可选兼容检查：`node packages/specwriter/examples/graphrag-smoke.mjs PATH/TO/PYTHON` 使用官方 GraphRAG 3.3.0 执行 init、标准/增量配置 dry-run、query/update 参数检查、原生增量文档差分/合并，以及 parquet 引用映射（含 CRLF 原文）。不执行真实模型索引/查询；完整问答需要有效供应商凭据。
+
+已有小说重新 init 安装新版 Skills 与协议；作者改过的 Skills 保留并报告冲突。未完成章节先 prepare --refresh，再按版本 2 重新提取和审阅；已接纳历史保留。图计算版本升级为 2，旧派生 Microsoft 索引需要为新快照重新建立。
 
 当前是可运行 MVP：Microsoft GraphRAG 默认用于准备和查询，本地结构化记忆负责正式状态依据并提供显式离线模式；本地阅读器负责正文展示、批注与交付，没有独立写作 Agent、MCP 服务或直接修改正文的 Web 编辑器。证据校验能确认引用存在，不能机械证明语义蕴含或文学质量；这些由 Codex 审阅。故事内时间暂为文本，不自动推断复杂倒叙关系。百万字规模的质量与性能尚未基准验证。
 

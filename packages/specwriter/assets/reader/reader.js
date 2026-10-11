@@ -2,7 +2,7 @@
 const $ = id => document.getElementById(id);
 const token = document.querySelector('meta[name="reader-token"]').content;
 const state = { scope: document.querySelector('meta[name="reader-scope"]').content, work: document.querySelector('meta[name="reader-work"]').content,
-  book: null, chapter: null, feedback: [], selection: null, epoch: 0, font: 20, leading: 1.95, notes: new Map() };
+  book: null, chapter: null, feedback: [], selection: null, epoch: 0, font: 20, leading: 1.95, notes: new Map(), preferences: { positions: {} } };
 const statusLabels = { accepted: '已接纳', stale: '需要重审', draft: '草稿' };
 function message(text = '', kind = 'error') { $('message').textContent = text; $('message').dataset.state = kind; $('message').hidden = !text; }
 function safely(action) { return async (...args) => { try { await action(...args); } catch (error) { message(error.message); } }; }
@@ -16,12 +16,31 @@ const node = (tag, text, className) => { const element = document.createElement(
 function localGet(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } }
 function localSet(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* reading works even with disabled browser storage */ } }
 function settingKey() { return `specwriter:${state.book?.bookId ?? 'reader'}:settings`; }
-function positionKey() { return `specwriter:${state.book.bookId}:${state.scope}:${state.work}:position`; }
+function positionKey(chapterKey) {
+  const parts = chapterKey?.split(':');
+  const scope = parts?.[0] || state.scope;
+  const work = scope === 'draft' ? parts?.[1] || state.work : '';
+  return `specwriter:${state.book.bookId}:${scope}:${work}:position`;
+}
+function positionScope() { return state.scope === 'draft' ? `draft:${state.work}` : 'accepted'; }
+let preferenceTimer, preferencePatch = {}, preferenceQueue = Promise.resolve();
+function persistPreferences(patch) {
+  preferencePatch = { ...preferencePatch, ...patch, positions: { ...preferencePatch.positions, ...patch.positions } };
+  clearTimeout(preferenceTimer); preferenceTimer = setTimeout(flushPreferences, 700);
+}
+function flushPreferences() {
+  clearTimeout(preferenceTimer);
+  if (!Object.keys(preferencePatch).length) return;
+  const patch = preferencePatch; preferencePatch = {};
+  preferenceQueue = preferenceQueue.then(() => api('/api/preferences', { method: 'POST', body: JSON.stringify(patch), keepalive: true }))
+    .catch(error => { message(`阅读进度保存失败：${error.message}`); });
+}
 function applySettings() {
   document.documentElement.style.setProperty('--prose-size', `${state.font}px`);
   document.documentElement.style.setProperty('--prose-leading', state.leading);
   $('font-down').disabled = state.font <= 16; $('font-up').disabled = state.font >= 28;
-  localSet(settingKey(), { font: state.font, leading: state.leading, theme: document.documentElement.dataset.theme || 'light' });
+  const settings = { font: state.font, leading: state.leading, theme: document.documentElement.dataset.theme || 'light' };
+  localSet(settingKey(), settings); state.preferences.settings = settings; persistPreferences({ settings });
 }
 function clearQuote() { state.selection = null; $('quote').textContent = '整章意见'; $('clear-quote').hidden = true; }
 function renderProse(target, body, selectable = false) {
@@ -59,10 +78,13 @@ function captureSelection() {
 function savePosition() {
   if (!state.book || !state.chapter) return;
   const rect = $('reading').getBoundingClientRect();
-  const start = window.scrollY + rect.top;
+  const start = Math.max(0, window.scrollY + rect.top - document.querySelector('.topbar').offsetHeight);
   const travel = Math.max(1, $('reading').offsetHeight - window.innerHeight);
   const ratio = Math.min(1, Math.max(0, (window.scrollY - start) / travel));
-  localSet(positionKey(), { key: state.chapter.key, ratio });
+  const position = { key: state.chapter.key, ratio, bodyHash: state.chapter.bodyHash };
+  const scope = state.chapter.key.startsWith('draft:') ? state.chapter.key.split(':').slice(0, 2).join(':') : 'accepted';
+  localSet(positionKey(state.chapter.key), position); state.preferences.positions[scope] = position;
+  persistPreferences({ positions: { [scope]: position } });
   $('progress').textContent = `${Math.round(ratio * 100)}%`;
 }
 function renderCatalog() {
@@ -81,11 +103,14 @@ function renderCatalog() {
 }
 async function loadBook(preferred, restore = false) {
   const epoch = ++state.epoch;
+  flushPreferences(); await preferenceQueue;
   const query = new URLSearchParams({ scope: state.scope, work: state.work });
   const book = await api(`/api/book?${query}`);
   if (epoch !== state.epoch) return;
   state.book = book;
-  const settings = localGet(settingKey(), {});
+  state.preferences = await api('/api/preferences');
+  if (epoch !== state.epoch) return;
+  const settings = state.preferences.settings ?? localGet(settingKey(), {});
   state.font = Math.max(16, Math.min(28, Number(settings.font) || 20));
   state.leading = settings.leading === 2.35 ? 2.35 : 1.95;
   document.documentElement.dataset.theme = settings.theme === 'dark' ? 'dark' : 'light';
@@ -100,9 +125,9 @@ async function loadBook(preferred, restore = false) {
   for (const work of book.works) { const option = node('option', `${work.title}${work.status === 'archived' ? '（已归档）' : ''}`); option.value = work.id; $('work').append(option); }
   $('work').value = state.work || book.works[0]?.id || '';
   renderCatalog();
-  const position = localGet(positionKey(), {});
+  const position = state.preferences.positions[positionScope()] ?? localGet(positionKey(), {});
   const key = preferred && book.chapters.some(item => item.key === preferred) ? preferred : restore && book.chapters.some(item => item.key === position.key) ? position.key : book.chapters.find(item => item.status !== 'stale')?.key ?? book.chapters[0]?.key;
-  if (key) await openChapter(key, restore && key === position.key ? position.ratio : 0, epoch);
+  if (key) await openChapter(key, restore && key === position.key && (!position.bodyHash || book.chapters.find(item => item.key === key)?.bodyHash === position.bodyHash) ? position.ratio : 0, epoch);
   else {
     state.chapter = null; clearQuote(); $('chapter-title').textContent = state.scope === 'draft' ? '还没有草稿' : '故事，从这里开始';
     $('chapter-meta').textContent = ''; $('chapter-state').textContent = ''; $('chapter-warning').hidden = true;
@@ -113,6 +138,7 @@ async function loadBook(preferred, restore = false) {
   $('export-open').disabled = !book.trustedThrough; $('export-open').title = book.trustedThrough ? '导出正式正文' : '先接纳至少一章正文';
 }
 async function openChapter(key, ratio = 0, existingEpoch) {
+  if (state.chapter && state.chapter.key !== key) savePosition();
   if (state.chapter) state.notes.set(state.chapter.key, $('note').value);
   const epoch = existingEpoch ?? ++state.epoch;
   $('prose').setAttribute('aria-busy', 'true');
@@ -170,9 +196,9 @@ $('clear-quote').addEventListener('click', clearQuote);
 $('note').addEventListener('input', () => $('note').setAttribute('aria-invalid', 'false'));
 $('refresh').addEventListener('click', safely(async () => { message(); savePosition(); await loadBook(state.chapter?.key, true); }));
 $('chapter-picker').addEventListener('change', safely(() => openChapter($('chapter-picker').value)));
-$('accepted-mode').addEventListener('click', safely(async () => { state.scope = 'accepted'; await loadBook(); }));
-$('draft-mode').addEventListener('click', safely(async () => { state.scope = 'draft'; state.work = $('work').value; await loadBook(); }));
-$('work').addEventListener('change', safely(async () => { state.work = $('work').value; await loadBook(); }));
+$('accepted-mode').addEventListener('click', safely(async () => { savePosition(); state.scope = 'accepted'; await loadBook(undefined, true); }));
+$('draft-mode').addEventListener('click', safely(async () => { savePosition(); state.scope = 'draft'; state.work = $('work').value; await loadBook(undefined, true); }));
+$('work').addEventListener('change', safely(async () => { savePosition(); state.work = $('work').value; await loadBook(undefined, true); }));
 for (const [id, step] of [['previous', -1], ['next', 1]]) $(id).addEventListener('click', safely(() => {
   const index = state.book.chapters.findIndex(item => item.key === state.chapter?.key);
   const chapter = state.book.chapters[index + step]; if (chapter) return openChapter(chapter.key);
@@ -228,5 +254,6 @@ $('compare-open').addEventListener('click', safely(async () => {
 $('version-picker').addEventListener('change', safely(compareVersion));
 let scrolling;
 window.addEventListener('scroll', () => { clearTimeout(scrolling); scrolling = setTimeout(savePosition, 150); }, { passive: true });
-window.addEventListener('pagehide', savePosition);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { savePosition(); flushPreferences(); } });
+window.addEventListener('pagehide', () => { savePosition(); flushPreferences(); });
 safely(() => loadBook(undefined, true))();

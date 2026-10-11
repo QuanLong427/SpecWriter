@@ -41,6 +41,7 @@ export async function startReader(project: Project, options: ReaderScope & { por
       if (path.startsWith('/api/') && request.headers['x-reader-token'] !== token) { json(response, { error: 'Refresh the reader to obtain its session token' }, 403); return; }
       if (request.method === 'GET') {
         if (path === '/api/book') { json(response, reader.catalog({ draft: url.searchParams.get('scope') === 'draft', work: url.searchParams.get('work') ?? undefined })); return; }
+        if (path === '/api/preferences') { json(response, reader.preferences()); return; }
         if (path === '/api/chapter') { json(response, reader.chapter(url.searchParams.get('key') ?? '')); return; }
         if (path === '/api/versions') { json(response, reader.versions(positiveInteger(url.searchParams.get('chapter'), 'chapter'))); return; }
         if (path === '/api/version') { json(response, reader.version(positiveInteger(url.searchParams.get('chapter'), 'chapter'), positiveInteger(url.searchParams.get('revision'), 'revision'))); return; }
@@ -61,6 +62,7 @@ export async function startReader(project: Project, options: ReaderScope & { por
           response.writeHead(200, { 'Content-Type': `${file.type}; charset=utf-8` }); response.end(content); return;
         }
       } else if (request.method === 'POST') {
+        if (path === '/api/preferences') { json(response, reader.savePreferences(await body(request))); return; }
         if (path === '/api/export') {
           const input = await body(request);
           if (!input || typeof input.format !== 'string' || Object.keys(input).some(key => key !== 'format')) throw new Error('Invalid export fields');

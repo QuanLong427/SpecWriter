@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Project, NovelReader, initProject, startReader } from '../dist/index.js';
+import { demoReview } from './artifacts.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'specwriter-reader-demo-'));
 initProject(root, '废井来信 · 示例小说', { memoryBackend: 'local' });
@@ -20,8 +21,8 @@ for (let index = 0; index < bodies.length; index++) {
   const paths = Object.fromEntries(Object.entries(prepared.paths).map(([key, path]) => [key, join(root, path)]));
   writeFileSync(paths.draft, bodies[index]);
   const metadata = project.hashes(chapter, 'opening');
-  writeFileSync(paths.delta, JSON.stringify({ ...load(paths.delta), ...metadata, title: ['井底的信', '雨后的脚步', '第三封信'][index], summary: '林舟在废井边收到来历不明的信。', characters: ['林舟'], key_events: [{ description: '林舟遇见来信', evidence: { quote: bodies[index] } }] }));
-  writeFileSync(paths.review, JSON.stringify({ ...load(paths.review), chapter, contextHash: metadata.contextHash, draftHash: metadata.draftHash, reviewed: true }));
+  writeFileSync(paths.delta, JSON.stringify({ ...load(paths.delta), ...metadata, title: ['井底的信', '雨后的脚步', '第三封信'][index], summary: ['林舟在废井边收到来历不明的信。', '白衡带来一双鞋，要求林舟先作决定。', '林舟接过鞋，找到通向河流的路线。'][index], characters: ['林舟'], key_events: [{ description: ['林舟收到信', '白衡带来鞋', '林舟发现路线'][index], evidence: { quote: bodies[index], basis: 'established' } }] }));
+  writeFileSync(paths.review, JSON.stringify(demoReview(load(paths.review), metadata)));
   if (chapter < 3) project.commit(chapter, 'opening');
 }
 const reader = new NovelReader(project);

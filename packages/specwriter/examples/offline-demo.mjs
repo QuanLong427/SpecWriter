@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { initProject, Project } from '../dist/index.js';
+import { demoReview } from './artifacts.mjs';
 
 // Deterministic, model-free demonstration of the same artifact protocol used by Codex Skills.
 const root = mkdtempSync(join(tmpdir(), 'specwriter-demo-'));
@@ -20,19 +21,20 @@ try {
   ];
   for (const [index, passage] of passages.entries()) {
     const chapter = index + 1;
-    const prepared = project.prepare(chapter, 'opening', { query: '林舟 青铜钥匙 师父' });
+    let prepared = project.prepare(chapter, 'opening', { query: '林舟 青铜钥匙 师父' });
     writeFileSync(join(root, prepared.paths.draft), passage.body + '\n');
     writeFileSync(join(root, prepared.paths.intent), `# 第${chapter}章意图\n\n${passage.title}：用发现和行动推进悬念。\n`);
+    prepared = project.prepare(chapter, 'opening', { query: '林舟 青铜钥匙 师父', refresh: true });
     const metadata = project.hashes(chapter, 'opening');
-    const evidence = { quote: passage.body };
+    const evidence = { quote: passage.body, basis: 'established' };
     const delta = { ...parse(prepared.paths.delta), ...metadata, title: passage.title, summary: passage.body, characters: ['林舟'], key_events: [{ description: passage.title, evidence }] };
     delta.entities = [{ id: 'lin-zhou', name: '林舟', type: 'character', aliases: [], description: '探索师父失踪真相的人物', evidence }];
     delta.narrative_events = [{ id: chapter === 1 ? 'find-key' : 'try-door', description: chapter === 1 ? '林舟在废井拾取钥匙' : '林舟尝试开门，听见咳嗽声', story_time: null, participants: ['lin-zhou'], location: chapter === 1 ? '废井' : '石门', causes: [], scope: 'world', holder: null, evidence }];
     delta.foreshadow_updates = [{ id: 'masters-disappearance', action: chapter === 1 ? 'plant' : 'advance', description: chapter === 1 ? '师父失踪与青铜钥匙的联系' : null, evidence }];
     if (passage.changes) delta.state_changes.push({ ...passage.changes, reason: null, scope: 'world', holder: null, evidence });
-    else delta.facts.push({ subject: '师父', predicate: '状态', object: '活着', scope: 'belief', holder: '林舟', evidence });
+    else delta.facts.push({ subject: '师父', predicate: '状态', object: '活着', scope: 'belief', holder: '林舟', evidence: { ...evidence, basis: 'inferred' } });
     save(prepared.paths.delta, delta);
-    save(prepared.paths.review, { ...parse(prepared.paths.review), chapter, contextHash: metadata.contextHash, draftHash: metadata.draftHash, reviewed: true, notes: ['示例：人物的判断保留为认知，不升级为世界事实。'] });
+    save(prepared.paths.review, demoReview(parse(prepared.paths.review), metadata));
     project.verify(chapter, 'opening'); project.commit(chapter, 'opening');
   }
   project.archive('opening');

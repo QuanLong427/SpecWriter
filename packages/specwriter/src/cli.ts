@@ -8,8 +8,11 @@ import { WriterMemory } from './writer-memory.js';
 import { NovelReader } from './reader.js';
 import { startReader } from './reader-server.js';
 import { spawn } from 'node:child_process';
+import { UsageLedger, validatePrices, type Prices } from './usage.js';
+import { readJson } from './files.js';
+import { runBenchmark, scoreBenchmark, type BenchmarkArm } from './benchmark.js';
 
-const help = `SpecWriter 0.4 — Codex fiction workflows + WriterMemory + local novel reader
+const help = `SpecWriter 0.6 — Codex fiction workflows + WriterMemory + local novel reader
 
 Usage: specwriter <command> [arguments] [--root PATH] [--json]
 
@@ -28,17 +31,30 @@ Usage: specwriter <command> [arguments] [--root PATH] [--json]
                                 Default Microsoft GraphRAG retrieval; auto-index accepted prefix
   memory query TEXT --backend local [--at N] [--holder NAME] [--hops 1..4]
                                 Explicit offline structural memory retrieval
-  memory configure --backend microsoft-graphrag|local [--method METHOD] [--auto-index true|false]
+  memory configure --backend microsoft-graphrag|local [--method METHOD] [--auto-index true|false] [--retain N]
                                 Set the book's memory backend; no silent fallback
   memory graph [--at N] [--holder NAME]
                                 Export the chapter-bounded provenance graph as JSON
   memory rebuild                Rebuild derived full-text and graph indexes
+  memory usage [--prices FILE]   Report observed GraphRAG tokens, cache hits and optional cost
+  benchmark run [--mode offline|live] [--dataset FILE] [--out NEW_DIR]
+                [--provider BOOK_ROOT --max-operations N] [--arms cold,warm,incremental,structural]
+                [--budget CHARS] [--method local|global|drift|basic]
+                                Run isolated memory experiments; offline is the default
+  benchmark score --run DIR --ratings FILE [--prices FILE]
+                                Aggregate version-bound human ratings and usage
   memory graphrag export [--at N]
                                 Export an immutable accepted-prose prefix (no model)
   memory graphrag setup --python EXE --model MODEL --embedding MODEL
                                 Initialize the default Microsoft GraphRAG 3.3.x provider
-  memory graphrag index [--at N]
-                                Build prefix-isolated embeddings and community reports
+  memory graphrag index [--at N] [--rebuild]
+                                Incrementally extend a verified prefix; rebuild changed configuration
+  memory graphrag status [--at N]
+                                Inspect index progress, lock and readiness without model calls
+  memory graphrag recover [--at N]
+                                Recover only a lock whose recorded process has stopped
+  memory graphrag prune [--keep N] [--dry-run]
+                                Keep recent/current and prepared indexes; preserve prose and receipts
   memory graphrag query TEXT [--at N] [--method local|global|drift|basic]
                                 Retrieve an advisory answer from Microsoft GraphRAG
   history N                     List accepted chapter revisions
@@ -62,7 +78,7 @@ interface Arguments { positional: string[]; flags: Map<string, string | boolean>
 function parseArguments(values: string[]): Arguments {
   const positional: string[] = [];
   const flags = new Map<string, string | boolean>();
-  const booleans = new Set(['json', 'help', 'refresh', 'capture', 'draft', 'no-open', 'reopen']);
+  const booleans = new Set(['json', 'help', 'refresh', 'capture', 'draft', 'no-open', 'reopen', 'rebuild', 'dry-run']);
   for (let index = 0; index < values.length; index++) {
     const value = values[index]!;
     if (!value.startsWith('--')) { positional.push(value); continue; }
@@ -83,7 +99,8 @@ async function main(): Promise<void> {
   if (!command || command === 'help' || args.flags.has('help')) { process.stdout.write(help); return; }
   const allowed: Record<string, string[]> = {
     init: ['name', 'backend'], status: [], propose: ['title', 'from', 'to'], prepare: ['work', 'query', 'budget', 'refresh'],
-    hash: ['work'], verify: ['work'], commit: ['work'], memory: ['at', 'holder', 'limit', 'hops', 'python', 'model', 'embedding', 'method', 'backend', 'auto-index'], history: [], archive: [], sync: ['capture'], doctor: [],
+    hash: ['work'], verify: ['work'], commit: ['work'], memory: ['at', 'holder', 'limit', 'hops', 'python', 'model', 'embedding', 'method', 'backend', 'auto-index', 'retain', 'keep', 'rebuild', 'dry-run', 'prices'], history: [], archive: [], sync: ['capture'], doctor: [],
+    benchmark: ['mode', 'dataset', 'out', 'provider', 'max-operations', 'arms', 'budget', 'method', 'run', 'ratings', 'prices'],
     read: ['draft', 'work', 'port', 'no-open'], export: ['format'], feedback: ['chapter', 'work', 'reopen']
   };
   if (!allowed[command]) throw new Error(`Unknown command: ${command}`);
@@ -109,12 +126,34 @@ async function main(): Promise<void> {
     try { if (!project.store.revisions().length) project.sync(); } finally { project.close(); }
     print(result); return;
   }
+  const prices = () => { const path = option('prices'); if (!path) return undefined; const value = readJson<Prices>(resolve(path)); validatePrices(value); return value; };
+  if (command === 'benchmark') {
+    count(1); const action = position(0, 'benchmark action');
+    const flags = action === 'run' ? ['mode', 'dataset', 'out', 'provider', 'max-operations', 'arms', 'budget', 'method'] : action === 'score' ? ['run', 'ratings', 'prices'] : [];
+    if (!['run', 'score'].includes(action)) throw new Error('Benchmark action must be run or score');
+    for (const flag of args.flags.keys()) if (!['json', ...flags].includes(flag)) throw new Error(`Unsupported option --${flag} for benchmark ${action}`);
+    if (action === 'score') { print(scoreBenchmark(option('run', true)!, option('ratings', true)!, prices())); return; }
+    const controller = new AbortController(), stop = () => controller.abort();
+    process.once('SIGINT', stop); process.once('SIGTERM', stop);
+    try { const result = await runBenchmark({ mode: option('mode') as 'offline' | 'live' | undefined, dataset: option('dataset'), out: option('out'), provider: option('provider'),
+      maxOperations: option('max-operations') === undefined ? undefined : positiveInteger(option('max-operations'), 'max-operations'),
+      arms: option('arms')?.split(',') as BenchmarkArm[] | undefined, budget: option('budget') === undefined ? undefined : positiveInteger(option('budget'), 'budget'),
+      method: option('method') as 'local' | 'global' | 'drift' | 'basic' | undefined, signal: controller.signal,
+      onProgress: event => { if (event.operation) process.stderr.write(JSON.stringify({ event: 'benchmark-progress', ...event }) + '\n'); } });
+      print({ directory: result.directory, report: result.report, data: result.data, runId: result.runId, mode: result.mode, status: result.status,
+        cases: result.cases.length, arms: result.arms, modelCalls: result.modelCalls, scheduledOperations: result.scheduledOperations, qualityEligible: result.qualityEligible, note: result.note }); }
+    finally { process.off('SIGINT', stop); process.off('SIGTERM', stop); } return;
+  }
   const project = new Project(option('root') ? resolve(option('root')!) : findRoot(process.cwd()));
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  if (command !== 'read') { process.once('SIGINT', cancel); process.once('SIGTERM', cancel); }
+  const memoryOptions = { signal: controller.signal, onProgress: (progress: import('./microsoft-graphrag.js').IndexProgress) => process.stderr.write(JSON.stringify({ event: 'graphrag-progress', ...progress }) + '\n') };
   try {
     switch (command) {
       case 'status': count(0); print(project.status()); break;
       case 'propose': count(1); print(project.propose(position(0, 'work id'), option('title', true)!, positiveInteger(option('from', true), 'from'), positiveInteger(option('to', true), 'to'))); break;
-      case 'prepare': count(1); print(await new WriterMemory(project).prepare(positiveInteger(position(0, 'chapter'), 'chapter'), option('work', true)!, { query: option('query'), budget: option('budget') === undefined ? undefined : positiveInteger(option('budget'), 'budget'), refresh: args.flags.has('refresh') })); break;
+      case 'prepare': count(1); print(await new WriterMemory(project).prepare(positiveInteger(position(0, 'chapter'), 'chapter'), option('work', true)!, { ...memoryOptions, query: option('query'), budget: option('budget') === undefined ? undefined : positiveInteger(option('budget'), 'budget'), refresh: args.flags.has('refresh') })); break;
       case 'hash': count(1); print(project.hashes(positiveInteger(position(0, 'chapter'), 'chapter'), option('work', true)!)); break;
       case 'verify': count(1); print(project.verify(positiveInteger(position(0, 'chapter'), 'chapter'), option('work', true)!)); break;
       case 'commit': count(1); print(project.commit(positiveInteger(position(0, 'chapter'), 'chapter'), option('work', true)!)); break;
@@ -164,36 +203,52 @@ async function main(): Promise<void> {
       }
       case 'memory': {
         const subcommand = position(0, 'memory subcommand');
+        if (option('prices') && subcommand !== 'usage') throw new Error('--prices applies only to memory usage');
+        const memoryFlags: Record<string, string[]> = { show: ['at'], usage: ['prices'], rebuild: [], graph: ['at', 'holder'], configure: ['backend', 'method', 'auto-index', 'retain'], query: ['at', 'holder', 'limit', 'hops', 'backend', 'method'] };
+        if (subcommand !== 'graphrag') {
+          if (!memoryFlags[subcommand]) throw new Error('Unknown memory subcommand');
+          for (const flag of args.flags.keys()) if (!['root', 'json', ...memoryFlags[subcommand]!].includes(flag)) throw new Error(`Unsupported option --${flag} for memory ${subcommand}`);
+        }
         let at: number | undefined;
         if (option('at') !== undefined) {
           at = Number(option('at'));
           if (!Number.isSafeInteger(at) || at < 0) throw new Error('at must be a nonnegative integer');
         }
         if (subcommand === 'show') { count(1); print(project.memory(at)); }
+        else if (subcommand === 'usage') {
+          count(1);
+          print(new UsageLedger(project.root).report(prices()));
+        }
         else if (subcommand === 'rebuild') { count(1); print(project.rebuildSearch()); }
         else if (subcommand === 'graph') { count(1); print(project.graph(at, option('holder'))); }
         else if (subcommand === 'configure') {
           count(1);
           const autoIndex = option('auto-index');
           if (autoIndex !== undefined && !['true', 'false'].includes(autoIndex)) throw new Error('--auto-index must be true or false');
-          print(configureMemory(project.root, { backend: option('backend', true)! as 'microsoft-graphrag' | 'local', method: option('method') as 'local' | 'global' | 'drift' | 'basic' | undefined, ...(autoIndex === undefined ? {} : { autoIndex: autoIndex === 'true' }) }));
+          const retain = option('retain') === undefined ? undefined : Number(option('retain'));
+          print(configureMemory(project.root, { backend: option('backend', true)! as 'microsoft-graphrag' | 'local', method: option('method') as 'local' | 'global' | 'drift' | 'basic' | undefined, ...(autoIndex === undefined ? {} : { autoIndex: autoIndex === 'true' }), ...(retain === undefined ? {} : { indexRetention: retain }) }));
         }
-        else if (subcommand === 'query') { count(2); print(await new WriterMemory(project).query(position(1, 'query text'), { at, holder: option('holder'), limit: option('limit') === undefined ? undefined : positiveInteger(option('limit'), 'limit'), hops: option('hops') === undefined ? undefined : positiveInteger(option('hops'), 'hops'), backend: option('backend') as 'microsoft-graphrag' | 'local' | undefined, method: option('method') as 'local' | 'global' | 'drift' | 'basic' | undefined })); }
+        else if (subcommand === 'query') { count(2); print(await new WriterMemory(project).query(position(1, 'query text'), { ...memoryOptions, at, holder: option('holder'), limit: option('limit') === undefined ? undefined : positiveInteger(option('limit'), 'limit'), hops: option('hops') === undefined ? undefined : positiveInteger(option('hops'), 'hops'), backend: option('backend') as 'microsoft-graphrag' | 'local' | undefined, method: option('method') as 'local' | 'global' | 'drift' | 'basic' | undefined })); }
         else if (subcommand === 'graphrag') {
           if (option('holder') || option('hops') || option('limit')) throw new Error('Microsoft GraphRAG returns author-level advisory answers; --holder, --hops and --limit apply only to local memory query');
           const provider = new MicrosoftGraphRag(project);
           const action = position(1, 'GraphRAG action');
+          const actionFlags: Record<string, string[]> = { setup: ['python', 'model', 'embedding'], index: ['at', 'rebuild'], query: ['at', 'method'], export: ['at'], status: ['at'], recover: ['at'], prune: ['keep', 'dry-run'] };
+          if (!actionFlags[action]) throw new Error('Unknown GraphRAG action');
+          for (const flag of args.flags.keys()) if (!['root', 'json', ...actionFlags[action]!].includes(flag)) throw new Error(`Unsupported option --${flag} for GraphRAG ${action}`);
           if (action === 'export') { count(2); print(provider.export(at)); }
           else if (action === 'setup') { count(2); print(await provider.setup({ python: option('python', true)!, model: option('model', true)!, embedding: option('embedding', true)! })); }
-          else if (action === 'index') { count(2); print(await provider.index(at)); }
-          else if (action === 'query') { count(3); print(await provider.query(position(2, 'query text'), { at, method: option('method') as 'local' | 'global' | 'drift' | 'basic' | undefined })); }
-          else throw new Error('GraphRAG action must be setup, export, index or query');
+          else if (action === 'index') { count(2); print(await provider.index(at, { ...memoryOptions, rebuild: args.flags.has('rebuild') })); }
+          else if (action === 'query') { count(3); print(await provider.query(position(2, 'query text'), { signal: controller.signal, at, method: option('method') as 'local' | 'global' | 'drift' | 'basic' | undefined })); }
+          else if (action === 'status') { count(2); print(provider.inspect(at)); }
+          else if (action === 'recover') { count(2); print(provider.recover(at)); }
+          else if (action === 'prune') { count(2); print(await provider.prune({ keep: option('keep') === undefined ? undefined : positiveInteger(option('keep'), 'keep'), dryRun: args.flags.has('dry-run') })); }
         }
         else throw new Error('Memory subcommand must be show, query, configure, graph, rebuild or graphrag');
         break;
       }
     }
-  } finally { project.close(); }
+  } finally { process.off('SIGINT', cancel); process.off('SIGTERM', cancel); project.close(); }
 }
 try { await main(); }
 catch (error) {

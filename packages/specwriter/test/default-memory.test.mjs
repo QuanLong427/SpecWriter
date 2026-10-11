@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { Project, WriterMemory, MicrosoftGraphRag, initProject, loadConfig, configureMemory } from '../dist/index.js';
+import { extraction, assessment } from './contract-fixture.mjs';
 
 const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
 const load = path => JSON.parse(readFileSync(path, 'utf8'));
@@ -19,6 +20,7 @@ function fixture(t) {
 function runner(calls, behavior = {}) {
   return async (_python, args) => {
     calls.push(args);
+    if (args[0] === '-X') return { stdout: JSON.stringify({ sources: [], unresolvedCitations: [{ citationType: 'entities', citationId: '1' }] }), stderr: '' };
     if (args[0] === '-c') return { stdout: '3.3.0', stderr: '' };
     const root = args[args.indexOf('--root') + 1];
     if (args[2] === 'init') {
@@ -27,7 +29,7 @@ function runner(calls, behavior = {}) {
       writeFileSync(join(root, 'prompts/extract.txt'), 'Extract only evidence');
       writeFileSync(join(root, '.env'), 'GRAPHRAG_API_KEY=private-test-placeholder\n');
     }
-    if (args[2] === 'index') {
+    if (args[2] === 'index' || args[2] === 'update') {
       if (behavior.failIndex) throw new Error('Index unavailable');
       mkdirSync(join(root, 'output'), { recursive: true });
       for (const name of ['documents', 'text_units', 'entities', 'relationships', 'communities', 'community_reports']) writeFileSync(join(root, `output/${name}.parquet`), 'mock provider index');
@@ -49,8 +51,8 @@ async function candidate(memory, project, root, chapter, body, options = {}) {
   const paths = Object.fromEntries(Object.entries(prepared.paths).map(([key, value]) => [key, join(root, value)]));
   writeFileSync(paths.draft, body);
   const metadata = project.hashes(chapter, 'opening');
-  writeFileSync(paths.delta, JSON.stringify({ ...load(paths.delta), ...metadata, title: '钥匙', summary: body, characters: ['林舟'], key_events: [{ description: body, evidence: { quote: body } }], facts: [{ subject: '林舟', predicate: '行动', object: body, scope: 'world', holder: null, evidence: { quote: body } }] }));
-  writeFileSync(paths.review, JSON.stringify({ ...load(paths.review), chapter, contextHash: metadata.contextHash, draftHash: metadata.draftHash, reviewed: true }));
+  writeFileSync(paths.delta, JSON.stringify(extraction({ ...load(paths.delta), ...metadata, title: '钥匙', summary: body, characters: ['林舟'], key_events: [{ description: body, evidence: { quote: body } }], facts: [{ subject: '林舟', predicate: '行动', object: body, scope: 'world', holder: null, evidence: { quote: body } }] }, body)));
+  writeFileSync(paths.review, JSON.stringify(assessment(load(paths.review), metadata)));
   return { paths, prepared };
 }
 async function first(project, root) {
@@ -161,6 +163,32 @@ test('creative input changes during semantic retrieval are rejected before artif
   const { memory } = await configured(project, { duringQuery: () => writeFileSync(join(root, 'specwriter/specs/world.md'), '# 新设定\n') });
   await assert.rejects(memory.prepare(2, 'opening'), /creative inputs changed/);
   assert.ok(!existsSync(join(root, project.chapterPaths('opening', 2).context)));
+});
+
+test('intent changes and cancellation during retrieval never publish a prepared context', async t => {
+  const { root, project } = fixture(t); await first(project, root);
+  const behavior = { duringQuery: () => writeFileSync(join(root, project.chapterPaths('opening', 2).intent), '# 改变视角与揭露边界\n') };
+  const { memory } = await configured(project, behavior);
+  await assert.rejects(memory.prepare(2, 'opening'), /creative inputs changed/);
+  assert.ok(!existsSync(join(root, project.chapterPaths('opening', 2).context)));
+  const controller = new AbortController();
+  behavior.duringQuery = () => controller.abort();
+  await assert.rejects(memory.prepare(2, 'opening', { query: '另一个查询', signal: controller.signal }), /abort/i);
+  assert.ok(!existsSync(join(root, project.chapterPaths('opening', 2).context)));
+});
+
+test('maintenance CLI rejects misplaced dry-run before any model operation and retention zero disables auto prune', async t => {
+  const { root, project } = fixture(t); await first(project, root);
+  const call = args => spawnSync(process.execPath, [cli, ...args, '--root', root, '--json'], { encoding: 'utf8' });
+  for (const args of [['memory', 'query', '林舟', '--dry-run'], ['memory', 'graphrag', 'index', '--dry-run'], ['memory', 'configure', '--backend', 'local', '--keep', '1']]) {
+    const result = call(args); assert.equal(result.status, 1); assert.match(result.stderr, /Unsupported option/);
+  }
+  assert.equal(call(['memory', 'configure', '--backend', 'microsoft-graphrag', '--retain', '0']).status, 0);
+  assert.equal(loadConfig(root).memory.indexRetention, 0);
+  const { memory } = await configured(project);
+  assert.equal((await memory.query('林舟')).indexMaintenance, undefined);
+  assert.equal(JSON.parse(call(['memory', 'graphrag', 'status', '--at', '1']).stdout).ready, true);
+  assert.equal(JSON.parse(call(['memory', 'graphrag', 'prune', '--keep', '1', '--dry-run']).stdout).dryRun, true);
 });
 
 test('retrieval receipt tampering blocks verification without regenerating the model answer', async t => {

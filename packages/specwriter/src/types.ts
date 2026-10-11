@@ -1,7 +1,7 @@
 // ChapterDelta adapts ainovel-cli's Apache-2.0 chapter-facts contract.
 // Modified: provenance, draft/context identity, temporal and belief scopes.
 // See ../THIRD_PARTY_NOTICES.md and ../licenses/ainovel-cli-Apache-2.0.txt.
-export interface Evidence { quote: string }
+export interface Evidence { quote: string; basis?: 'established' | 'reported' | 'inferred' | 'imagined'; start?: number; end?: number }
 export interface ScopedFact {
   subject: string;
   predicate: string;
@@ -38,11 +38,12 @@ export interface ResourceChange {
   evidence: Evidence;
 }
 export interface ChapterDelta {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   chapter: number;
   baseRevision: number | null;
   contextHash: string;
   draftHash: string;
+  intentHash?: string;
   title: string;
   summary: string;
   characters: string[];
@@ -58,10 +59,12 @@ export interface ChapterDelta {
   resource_changes?: ResourceChange[];
 }
 export interface ChapterReview {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   chapter: number;
   contextHash: string;
   draftHash: string;
+  intentHash?: string;
+  checks?: Record<'evidence' | 'coverage' | 'continuity', { checked: boolean; notes: string[] }>;
   reviewed: boolean;
   issues: { id: string; kind: 'continuity' | 'spec' | 'craft'; severity: 'blocking' | 'warning' | 'suggestion'; description: string; resolved: boolean; resolution?: string }[];
   notes: string[];
@@ -114,7 +117,7 @@ export interface MemoryState {
 }
 export interface ContextSource {
   id: string;
-  kind: 'spec' | 'plan' | 'proposal' | 'prose' | 'retrieval';
+  kind: 'spec' | 'plan' | 'proposal' | 'intent' | 'prose' | 'retrieval';
   source: string;
   reason: string;
   content: string;
@@ -125,6 +128,8 @@ export interface ContextSource {
 }
 export interface ContextPackage {
   schemaVersion: 1;
+  contractVersion?: 2;
+  intentHash?: string;
   chapter: number;
   workId: string;
   baseRevision: number | null;
@@ -148,17 +153,21 @@ export interface WorkItem {
 }
 export interface BookConfig {
   schemaVersion: 1;
+  bookId?: string;
   name: string;
   language: 'zh' | 'en';
   contextBudgetChars: number;
-  memory?: { backend: 'microsoft-graphrag' | 'local'; method?: GraphRagMethod; autoIndex?: boolean };
+  memory?: { backend: 'microsoft-graphrag' | 'local'; method?: GraphRagMethod; autoIndex?: boolean; indexRetention?: number };
 }
 export type GraphRagMethod = 'local' | 'global' | 'drift' | 'basic';
 export interface RetrievalReceipt {
   schemaVersion: 1; id: string; provider: 'microsoft-graphrag'; version: string;
   snapshotId: string; atChapter: number; method: GraphRagMethod; query: string;
   configHash: string; outputHash: string; answer: string; answerHash: string;
+  sources?: RetrievalSource[];
+  unresolvedCitations?: { citationType: string; citationId: string }[];
 }
+export interface RetrievalSource { citationType: string; citationId: string; chapter: number; revision: number; bodyHash: string; excerpt: string }
 export interface GraphNode extends Partial<Provenance> {
   id: string;
   kind: 'entity' | 'value' | 'event' | 'hook' | 'resource';
@@ -183,7 +192,7 @@ export interface GraphEdge extends Provenance {
 }
 export interface GraphSnapshot {
   schemaVersion: 1;
-  kernelVersion: 1;
+  kernelVersion: 1 | 2;
   snapshotId: string;
   atChapter: number;
   sourceRevisions: { chapter: number; revision: number; bodyHash: string; deltaHash: string }[];

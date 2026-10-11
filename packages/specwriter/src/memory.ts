@@ -1,4 +1,5 @@
 import { hash } from './files.js';
+import { resolveEntityReference } from './entity-reference.js';
 import type { MemoryFact, MemoryState, Revision, ScopedFact } from './types.js';
 
 export function trustedPrefix(revisions: Revision[]): Revision[] {
@@ -24,8 +25,8 @@ export function replay(revisions: Revision[], atChapter = trustedPrefix(revision
 
 export function applyRevision(state: MemoryState, revision: Revision): void {
   const { delta, chapter } = revision;
-  const evidenceLine = (quote: string): number => revision.body.slice(0, revision.body.indexOf(quote)).split('\n').length;
-  const provenance = (evidence: { quote: string }) => ({ sourceChapter: chapter, sourceRevision: revision.id, evidence, evidenceLine: evidenceLine(evidence.quote) });
+  const evidenceLine = (evidence: import('./types.js').Evidence): number => revision.body.slice(0, evidence.start ?? revision.body.indexOf(evidence.quote)).split('\n').length;
+  const provenance = (evidence: import('./types.js').Evidence) => ({ sourceChapter: chapter, sourceRevision: revision.id, evidence, evidenceLine: evidenceLine(evidence) });
   for (const input of delta.entities ?? []) {
     const previous = state.entities.find(item => item.id === input.id);
     if (previous && previous.type !== input.type) throw new Error(`Entity type cannot change: ${input.id}`);
@@ -33,8 +34,15 @@ export function applyRevision(state: MemoryState, revision: Revision): void {
     if (previous) state.entities[state.entities.indexOf(previous)] = updated;
     else state.entities.push(updated);
   }
-  const add = (fact: ScopedFact, replace = false, expected?: string | null): void => {
-    const current = state.facts.filter(item => item.validUntilChapter === null && factKey(item) === factKey(fact));
+  const ref = (value: string) => delta.schemaVersion === 2 ? resolveEntityReference(state, value) : value;
+  const scoped = (fact: ScopedFact): ScopedFact => ({ ...fact, subject: ref(fact.subject), holder: fact.holder === null ? null : ref(fact.holder) });
+  const key = (fact: ScopedFact) => delta.schemaVersion === 2 ? factKey({ ...fact, subject: resolveEntityReference(state, fact.subject, false), predicate: fact.predicate.startsWith('relationship:') ? `relationship:${resolveEntityReference(state, fact.predicate.slice(13), false)}` : fact.predicate, holder: fact.holder === null ? null : resolveEntityReference(state, fact.holder, false) }) : factKey(fact);
+  const operationKeys = new Set<string>();
+  const add = (rawFact: ScopedFact, replace = false, expected?: string | null): void => {
+    const fact = scoped(rawFact);
+    if (replace && operationKeys.has(key(fact))) throw new Error('Duplicate state operations after entity alias resolution');
+    if (replace) operationKeys.add(key(fact));
+    const current = state.facts.filter(item => item.validUntilChapter === null && key(item) === key(fact));
     if (replace) {
       if (expected === null && current.length) throw new Error(`State already exists for ${fact.subject}.${fact.predicate}; old_value must match`);
       if (expected !== null && (current.length !== 1 || current[0]?.object !== expected)) {
@@ -45,7 +53,7 @@ export function applyRevision(state: MemoryState, revision: Revision): void {
     state.facts.push({
       ...fact, id: hash(JSON.stringify([revision.id, state.facts.length, fact])),
       sourceChapter: chapter, sourceRevision: revision.id, validFromChapter: chapter,
-      validUntilChapter: null, evidenceLine: evidenceLine(fact.evidence.quote)
+      validUntilChapter: null, evidenceLine: evidenceLine(fact.evidence)
     });
   };
   // Apply preconditioned state updates before additive facts from the same chapter.
@@ -54,21 +62,25 @@ export function applyRevision(state: MemoryState, revision: Revision): void {
     scope: change.scope, holder: change.holder, evidence: change.evidence
   }, true, change.old_value);
   for (const relation of delta.relationship_changes) {
-    const fact: ScopedFact = { subject: relation.character_a, predicate: `relationship:${relation.character_b}`, object: relation.relation, scope: 'world', holder: null, evidence: relation.evidence };
-    for (const item of state.facts.filter(item => item.validUntilChapter === null && factKey(item) === factKey(fact))) item.validUntilChapter = chapter;
+    const fact: ScopedFact = { subject: ref(relation.character_a), predicate: `relationship:${ref(relation.character_b)}`, object: relation.relation, scope: 'world', holder: null, evidence: relation.evidence };
+    for (const item of state.facts.filter(item => item.validUntilChapter === null && key(item) === key(fact))) item.validUntilChapter = chapter;
     add(fact);
   }
   for (const intro of delta.cast_intros) add({ subject: intro.name, predicate: 'role', object: intro.brief_role, scope: 'world', holder: null, evidence: intro.evidence });
   for (const fact of delta.facts) {
-    if (delta.state_changes.some(change => factKey({ subject: change.entity, predicate: change.field, scope: change.scope, holder: change.holder }) === factKey(fact) && change.new_value !== fact.object)) {
+    if (delta.state_changes.some(change => key({ subject: change.entity, predicate: change.field, scope: change.scope, holder: change.holder, object: change.new_value, evidence: change.evidence }) === key(fact) && change.new_value !== fact.object)) {
       throw new Error(`Fact contradicts this chapter's state update: ${fact.subject}.${fact.predicate}`);
     }
     add(fact);
   }
   for (const change of delta.resource_changes ?? []) {
-    const previous = state.resources.find(item => item.entity === change.entity && item.resource === change.resource);
+    const entity = ref(change.entity);
+    const resourceKey = JSON.stringify(['resource', entity, change.resource]);
+    if (operationKeys.has(resourceKey)) throw new Error('Duplicate resource operations after entity alias resolution');
+    operationKeys.add(resourceKey);
+    const previous = state.resources.find(item => (delta.schemaVersion === 2 ? resolveEntityReference(state, item.entity, false) : item.entity) === entity && item.resource === change.resource);
     if (previous && Math.abs(previous.amount - change.opening) > 1e-9 * Math.max(1, Math.abs(change.opening))) throw new Error(`Resource opening value does not match: ${change.entity}.${change.resource}`);
-    const updated = { entity: change.entity, resource: change.resource, amount: change.closing, ...provenance(change.evidence) };
+    const updated = { entity, resource: change.resource, amount: change.closing, ...provenance(change.evidence) };
     if (previous) state.resources[state.resources.indexOf(previous)] = updated;
     else state.resources.push(updated);
   }
@@ -77,7 +89,7 @@ export function applyRevision(state: MemoryState, revision: Revision): void {
   }
   for (const event of delta.narrative_events ?? []) {
     if (state.episodes.some(item => item.id === event.id)) throw new Error(`Event already exists: ${event.id}`);
-    state.episodes.push({ ...event, kind: 'narrative-event', ...provenance(event.evidence) });
+    state.episodes.push({ ...event, participants: event.participants.map(ref), location: event.location === null ? null : ref(event.location), holder: event.holder === null ? null : ref(event.holder), kind: 'narrative-event', ...provenance(event.evidence) });
   }
   for (const episode of state.episodes) {
     for (const cause of episode.causes) {
@@ -114,8 +126,8 @@ export function applyRevision(state: MemoryState, revision: Revision): void {
     }
   }
   assertAcyclic(new Map(state.hooks.map(item => [item.id, [...(item.dependsOn ?? []), ...(item.supersededBy ? [item.supersededBy] : [])]])), 'Hook dependencies');
-  state.timeline.push(...delta.timeline_events.map(item => ({ ...item, sourceChapter: chapter, sourceRevision: revision.id })));
-  state.summaries.push({ chapter, revision: revision.id, title: delta.title, summary: delta.summary, characters: delta.characters });
+  state.timeline.push(...delta.timeline_events.map(item => ({ ...item, characters: item.characters.map(ref), sourceChapter: chapter, sourceRevision: revision.id })));
+  state.summaries.push({ chapter, revision: revision.id, title: delta.title, summary: delta.summary, characters: delta.characters.map(ref) });
   state.atChapter = chapter;
 }
 
@@ -163,7 +175,7 @@ export function proseChunks(body: string): { excerpt: string; line: number; toke
 }
 
 export function graphFacts(state: MemoryState, query: string, holder?: string): MemoryFact[] {
-  const visible = currentFacts(state).filter(item => item.scope === 'world' || item.holder === holder);
+  const visible = currentFacts(state).filter(item => item.scope === 'world' || (holder !== undefined && item.holder !== null && resolveEntityReference(state, item.holder, false) === resolveEntityReference(state, holder)));
   const queryTerms = new Set(terms(query));
   const seeds = visible.filter(item => terms(`${item.subject} ${item.predicate} ${item.object}`).some(term => queryTerms.has(term)));
   const entities = new Set(seeds.flatMap(item => [item.subject, item.object]));

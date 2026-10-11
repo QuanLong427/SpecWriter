@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "title": "铜匣之旅 · 记忆实验夹具",
+  "chapters": [
+    {
+      "chapter": 1,
+      "body": "林舟的旧称是小舟。他带着十枚灵石和一个上锁的铜匣出门。母亲说，到终点才能打开铜匣。",
+      "delta": {
+        "characters": ["林舟"],
+        "entities": [{"id":"lin-zhou","name":"林舟","type":"character","aliases":["小舟"],"description":"带着铜匣旅行的人","evidence":{"quote":"林舟的旧称是小舟。","basis":"established"}}],
+        "resource_changes": [{"entity":"林舟","resource":"灵石","opening":0,"change":10,"closing":10,"evidence":{"quote":"他带着十枚灵石和一个上锁的铜匣出门。","basis":"established"}}],
+        "foreshadow_updates": [{"id":"locked-box","action":"plant","description":"铜匣里的秘密","evidence":{"quote":"母亲说，到终点才能打开铜匣。","basis":"established"}}]
+      }
+    },
+    {
+      "chapter": 2,
+      "body": "小舟买了干粮，付出两枚灵石，剩下八枚。白衡是桥头的向导，两人结伴同行。",
+      "delta": {
+        "characters":["小舟","白衡"],
+        "entities":[{"id":"bai-heng","name":"白衡","type":"character","aliases":[],"description":"桥头向导","evidence":{"quote":"白衡是桥头的向导，两人结伴同行。","basis":"established"}}],
+        "resource_changes":[{"entity":"小舟","resource":"灵石","opening":10,"change":-2,"closing":8,"evidence":{"quote":"小舟买了干粮，付出两枚灵石，剩下八枚。","basis":"established"}}],
+        "relationship_changes":[{"character_a":"小舟","character_b":"白衡","relation":"同行伙伴","evidence":{"quote":"白衡是桥头的向导，两人结伴同行。","basis":"established"}}]
+      }
+    },
+    {
+      "chapter": 3,
+      "body": "林舟抵达旧塔。白衡没有见过匣内的东西，只猜测铜匣是空的。林舟没有回答。",
+      "delta": {
+        "characters":["林舟","白衡"],
+        "state_changes":[{"entity":"林舟","field":"位置","old_value":null,"new_value":"旧塔","reason":null,"scope":"world","holder":null,"evidence":{"quote":"林舟抵达旧塔。","basis":"established"}}],
+        "facts":[{"subject":"铜匣","predicate":"内容","object":"空的","scope":"belief","holder":"白衡","evidence":{"quote":"白衡没有见过匣内的东西，只猜测铜匣是空的。","basis":"inferred"}}]
+      }
+    },
+    {
+      "chapter": 4,
+      "body": "夜里，林舟独自打开铜匣，发现母亲留下的路线图。他把图收好，没有告诉白衡。铜匣的秘密终于揭开。",
+      "delta": {
+        "characters":["林舟"],
+        "facts":[{"subject":"铜匣","predicate":"内容","object":"母亲留下的路线图","scope":"world","holder":null,"evidence":{"quote":"夜里，林舟独自打开铜匣，发现母亲留下的路线图。","basis":"established"}}],
+        "foreshadow_updates":[{"id":"locked-box","action":"resolve","description":null,"evidence":{"quote":"铜匣的秘密终于揭开。","basis":"established"}}]
+      }
+    },
+    {
+      "chapter": 5,
+      "body": "林舟按照路线图找到了渡口。他付了一枚灵石过河，还剩七枚。白衡仍以为铜匣是空的。",
+      "delta": {
+        "characters":["林舟","白衡"],
+        "resource_changes":[{"entity":"林舟","resource":"灵石","opening":8,"change":-1,"closing":7,"evidence":{"quote":"他付了一枚灵石过河，还剩七枚。","basis":"established"}}]
+      }
+    }
+  ],
+  "steps": [
+    {
+      "id":"initial","through":2,
+      "questions":[
+        {"id":"alias","query":"小舟 林舟","category":"identity","expectedAnswer":"小舟和林舟是同一个人。","evidence":[{"chapter":1,"quote":"林舟的旧称是小舟。"}]},
+        {"id":"balance","query":"林舟 灵石","category":"resource","expectedAnswer":"截至第二章，林舟有八枚灵石。","evidence":[{"chapter":2,"quote":"小舟买了干粮，付出两枚灵石，剩下八枚。"}]}
+      ]
+    },
+    {
+      "id":"append","through":3,
+      "questions":[
+        {"id":"location","query":"林舟 位置","category":"state","expectedAnswer":"林舟在旧塔。","evidence":[{"chapter":3,"quote":"林舟抵达旧塔。"}]},
+        {"id":"unknown","query":"铜匣里面到底有什么？区分客观事实和白衡的猜测。","category":"unanswerable","expectedAnswer":"截至第三章无法确认匣内内容；空的是白衡的猜测。","unanswerable":true,"evidence":[{"chapter":3,"quote":"白衡没有见过匣内的东西，只猜测铜匣是空的。"}]}
+      ]
+    },
+    {
+      "id":"repeat","through":3,
+      "questions":[
+        {"id":"location","query":"林舟 位置","category":"cache","expectedAnswer":"林舟在旧塔。","evidence":[{"chapter":3,"quote":"林舟抵达旧塔。"}]}
+      ]
+    },
+    {
+      "id":"payoff","through":5,
+      "questions":[
+        {"id":"box","query":"铜匣 内容 秘密","category":"hook","expectedAnswer":"铜匣装着母亲留下的路线图，秘密已揭开。","evidence":[{"chapter":4,"quote":"夜里，林舟独自打开铜匣，发现母亲留下的路线图。"}]},
+        {"id":"belief","query":"白衡知道铜匣里装着路线图了吗？","category":"knowledge","expectedAnswer":"白衡不知道，仍以为铜匣是空的。","evidence":[{"chapter":5,"quote":"白衡仍以为铜匣是空的。"}]},
+        {"id":"balance","query":"林舟 灵石","category":"resource","expectedAnswer":"截至第五章还剩七枚灵石。","evidence":[{"chapter":5,"quote":"他付了一枚灵石过河，还剩七枚。"}]},
+        {"id":"route","query":"铜匣中的东西如何影响林舟的行程？","category":"cross-chapter","expectedAnswer":"林舟发现路线图后，按图找到渡口。","evidence":[{"chapter":4,"quote":"夜里，林舟独自打开铜匣，发现母亲留下的路线图。"},{"chapter":5,"quote":"林舟按照路线图找到了渡口。"}]}
+      ]
+    },
+    {
+      "id":"retcon","through":3,
+      "retcon":{
+        "chapter":3,
+        "body":"林舟抵达石桥。白衡没有见过匣内的东西，只猜测铜匣是空的。林舟没有回答。",
+        "delta":{
+          "characters":["林舟","白衡"],
+          "state_changes":[{"entity":"林舟","field":"位置","old_value":null,"new_value":"石桥","reason":null,"scope":"world","holder":null,"evidence":{"quote":"林舟抵达石桥。","basis":"established"}}],
+          "facts":[{"subject":"铜匣","predicate":"内容","object":"空的","scope":"belief","holder":"白衡","evidence":{"quote":"白衡没有见过匣内的东西，只猜测铜匣是空的。","basis":"inferred"}}]
+        }
+      },
+      "questions":[
+        {"id":"location","query":"林舟 位置","category":"retcon","expectedAnswer":"返修后的第三章，林舟在石桥，旧塔已失效。","evidence":[{"chapter":3,"quote":"林舟抵达石桥。"}]},
+        {"id":"unknown","query":"铜匣里面到底有什么？区分客观事实和白衡的猜测。","category":"future-boundary","expectedAnswer":"返修后的第三章仍无法确认匣内内容；第四章揭示不属于当前前缀。","unanswerable":true,"evidence":[{"chapter":3,"quote":"白衡没有见过匣内的东西，只猜测铜匣是空的。"}]}
+      ]
+    },
+    {
+      "id":"reconcile","through":5,
+      "questions":[
+        {"id":"route","query":"铜匣中的东西如何影响林舟的行程？","category":"reconcile","expectedAnswer":"后续章节重新接纳后，路线图与渡口事件恢复有效。","evidence":[{"chapter":4,"quote":"夜里，林舟独自打开铜匣，发现母亲留下的路线图。"},{"chapter":5,"quote":"林舟按照路线图找到了渡口。"}]}
+      ]
+    }
+  ]
+}

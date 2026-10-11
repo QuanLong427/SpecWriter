@@ -9,7 +9,8 @@
 - `propose opening-arc --title "开篇三章" --from 1 --to 3` 创建工作包；明确采用的设定放在 `specwriter/specs/`，未来安排放在 `specwriter/plans/`。
 - `prepare 1 --work opening-arc --query "本章冲突、人物和地点"` 取回带章节边界的记忆，返回所有路径。首章跳过模型检索；后续章节默认自动索引前缀、查询 Microsoft GraphRAG 并加入 context。
 - `memory query "青铜钥匙" --at 1` 默认语义检索；`--method global` 可做全局分析。角色认知核对用 `memory query "师父" --backend local --at 1 --holder 林舟 --hops 2`；world 与原文仍是作者视角，不能当作角色已知清单。
-- `hash 1 --work opening-arc` 获取草稿和上下文哈希。该命令只读，不能证明旧提取结果仍有效。
+- 完善 intent 后 `prepare 1 --work opening-arc --refresh`，将章纲及视角边界重新纳入上下文；保留已写草稿。
+- `hash 1 --work opening-arc` 获取草稿、上下文与章纲哈希。该命令只读，不能证明旧提取结果仍有效。
 - `verify 1 --work opening-arc` 检查结构、原文证据、版本、状态前置条件和阻塞问题。
 - `commit 1 --work opening-arc` 接纳正文与记忆；`archive opening-arc` 关闭全部章节已完成的工作包。
 
@@ -36,9 +37,9 @@
 
 ## 提取与审阅
 
-阅读准备命令返回的 context 与必要原文，完成 intent 和正文。然后获取 hash，依据**当前草稿**重新提取、重新审阅，将返回的 chapter、baseRevision、contextHash、draftHash 填入对应 JSON。
+阅读准备命令返回的 context 与必要原文，完成 intent，运行 prepare --refresh 后写正文。然后获取 hash，依据**当前草稿**重新提取、重新审阅，将返回的 chapter、baseRevision、contextHash、draftHash、intentHash 填入对应 JSON。新准备的 context 使用 contractVersion=2，delta/review 使用 schemaVersion=2；不能降级为 1 绕过检查。已接纳的版本 1 正文与提取仍可重放，旧待写草稿先 refresh。
 
-memory-delta 中每条事件、状态变化、关系、伏笔、新人物和事实都需要 `evidence: {"quote": "当前草稿中连续、逐字一致的原文"}`。提取正文已确立的内容，不把打算、猜想、读者误导或作者计划升级为世界事实。
+memory-delta 中每条事件、状态变化、关系、伏笔、新人物和事实都需要 `evidence: {"quote": "当前草稿中连续、逐字一致的原文", "basis": "established"}`。basis 区分 established（正文确立）、reported（传闻/转述）、inferred（推测）、imagined（梦境/想象）；world 事实及无 scope 的变更必须是 established，其他三类只能作为角色认知记录。正文明确发生的“听见传闻”可记录为真实动作，传闻结论本身不能升级为世界事实。引用重复出现时必须添加 start/end，按 JavaScript UTF-16 字符偏移、end 不含末尾字符，精确定位当前草稿。
 
 - `state_changes` 记录单一当前属性变更，`old_value` 必须匹配此前值，首次建立为 null。包含 entity、field、new_value、reason（可为 null）、scope、holder、evidence。
 - `facts` 记录可并存的事实，包含 subject、predicate、object、scope、holder、evidence。替换属性使用 state_changes，不能不断追加互相矛盾的当前位置。
@@ -48,7 +49,7 @@ memory-delta 中每条事件、状态变化、关系、伏笔、新人物和事�
 - `timeline_events.time` 是故事内时间文本；章节号是揭露边界，两者不同。当前版本不会自动推断复杂倒叙的时间关系。
 - title、summary 必须准确，characters 列出出场角色；key_events 至少一个带原文依据的事件。未使用的数组保留为空。
 
-审阅 JSON 设置 `reviewed: true`；issues 每项包含 id、kind（continuity/spec/craft）、severity（blocking/warning/suggestion）、description、resolved。resolved=true 时必须写 resolution。notes 记录带依据的整体观察，不伪造分数。草稿有改动时，原来的 hash、提取和审阅都需重新生成。
+审阅 JSON 设置 `reviewed: true`，checks.evidence、checks.coverage、checks.continuity 均为 `{checked: true, notes: ["实际核对的依据与结论"]}`。分别核对证据是否支持结论、提取有无关键遗漏、历史与章纲/视角/信息边界是否连续；不能用空 notes 或示例文字代替实际审阅。issues 每项包含 id、kind（continuity/spec/craft）、severity（blocking/warning/suggestion）、description、resolved。resolved=true 时必须写 resolution。notes 记录带依据的整体观察，不伪造分数。CLI 校验检查已完成和记录存在，语义与文学判断仍由 Codex 完成。草稿或章纲有改动时，原来的 hash、提取和审阅都需重新生成。
 
 执行 verify 后可根据既有授权 commit。若返回 projectionNeedsSync=true，数据库已经接纳，运行 sync 修复投影；不要把同一章重新提交当作恢复方式。
 

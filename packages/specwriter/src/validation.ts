@@ -12,6 +12,12 @@ export function validateDelta(value: unknown, body: string): asserts value is Ch
   for (const collection of [delta.key_events, delta.timeline_events, delta.foreshadow_updates, delta.relationship_changes, delta.state_changes, delta.cast_intros, delta.facts, delta.entities ?? [], delta.narrative_events ?? [], delta.resource_changes ?? []]) {
     for (const item of collection) {
       if (!body.includes(item.evidence.quote)) throw new Error(`Evidence quote does not occur in draft: ${item.evidence.quote.slice(0, 80)}`);
+      const evidence = item.evidence;
+      if (evidence.start !== undefined && (evidence.end! < evidence.start || body.slice(evidence.start, evidence.end) !== evidence.quote || evidence.end! > body.length)) throw new Error('Evidence quote does not match its exact offsets');
+      if (delta.schemaVersion === 2 && !evidence.basis) throw new Error('V2 evidence requires basis: established, reported, inferred or imagined');
+      if (delta.schemaVersion === 2 && evidence.start === undefined && body.indexOf(evidence.quote) !== body.lastIndexOf(evidence.quote)) throw new Error('Repeated evidence quote requires exact start/end offsets');
+      if (delta.schemaVersion === 2 && 'scope' in item && item.scope === 'world' && evidence.basis !== 'established') throw new Error('Reported, inferred or imagined evidence cannot establish a world fact/event; use belief scope or find establishing prose');
+      if (delta.schemaVersion === 2 && !('scope' in item) && evidence.basis !== 'established') throw new Error('Unscoped memory updates require established evidence; do not promote reports, inference or dreams to formal state');
     }
   }
   const unique = (items: string[], name: string): void => {
@@ -42,6 +48,9 @@ export function validateReview(value: unknown): asserts value is ChapterReview {
   if (!reviewValidator(value)) throw new Error(`Invalid review: ${ajv.errorsText(reviewValidator.errors)}`);
   const review = value as ChapterReview;
   if (!review.reviewed) throw new Error('Review has not been performed');
+  if (review.schemaVersion === 2) for (const [name, check] of Object.entries(review.checks!)) {
+    if (!check.checked || !check.notes.length) throw new Error(`Review check ${name} requires a completed, evidence-based assessment`);
+  }
   if (new Set(review.issues.map(item => item.id)).size !== review.issues.length) throw new Error('Duplicate review issue ids');
   for (const issue of review.issues) {
     if (issue.severity === 'blocking' && !issue.resolved) throw new Error(`Unresolved blocking review issue: ${issue.id}`);

@@ -1,14 +1,16 @@
 # Dependencies
 node_modules/
+__pycache__/
+*.py[cod]
 
 # Build output
 dist/
-dist-ssr/
-build/
+*.tgz
 
 # Environment variables (sensitive)
-.env.local
-.env.*.local
+.env
+.env.*
+!.env.example
 
 # IDE
 .vscode/
@@ -23,20 +25,3 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
-
-# Claude Code
-.claude/
-CLAUDE.md
-
-# Reference (not for public)
-ToonFlow.md
-MIMO-Reference/
-
-# OpenSpec
-openspec/
-
-# GStack
-.gstack/
-
-# Plan
-MyPlan.md

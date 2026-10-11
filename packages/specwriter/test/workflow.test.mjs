@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { Project, initProject, hash } from '../dist/index.js';
+import { extraction, assessment } from './contract-fixture.mjs';
 
 const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
 function fixture(t, to = 3) {
@@ -23,8 +24,9 @@ function candidate(project, root, chapter, body, changes = {}, work = 'opening',
   writeFileSync(paths.draft, body);
   const metadata = project.hashes(chapter, work);
   const delta = { ...load(paths.delta), ...metadata, title: `第${chapter}章`, summary: body, characters: ['林舟'], key_events: [{ description: body, evidence: { quote: body } }], ...changes };
-  const review = { ...load(paths.review), chapter, contextHash: metadata.contextHash, draftHash: metadata.draftHash, reviewed: true };
-  writeFileSync(paths.delta, JSON.stringify(delta, null, 2));
+  const review = assessment(load(paths.review), metadata);
+  writeFileSync(paths.delta, JSON.stringify(extraction(delta, body), null, 2));
+  Object.assign(delta, extraction(delta, body));
   writeFileSync(paths.review, JSON.stringify(review, null, 2));
   return { paths, delta, review, prepared };
 }

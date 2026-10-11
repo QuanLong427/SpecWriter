@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { atomicWrite, chapterId, hash, identifier, json, positiveInteger, readJson, safePath, writeNew } from './files.js';
 import { defaultMemoryQuery, loadConfig } from './init.js';
+import { resolveEntityReference } from './entity-reference.js';
 import { applyRevision, currentFacts, replay, terms, trustedPrefix } from './memory.js';
 import { dirtyFiles, projectViews } from './projections.js';
 import { Store } from './store.js';
@@ -42,7 +43,7 @@ export class Project {
     if (chapter !== undefined && (chapter < work.fromChapter || chapter > work.toChapter)) throw new Error('Chapter is outside this work range');
     return work;
   }
-  private inputSources(workId: string): ContextSource[] {
+  private inputSources(workId: string, chapter?: number): ContextSource[] {
     const sources: ContextSource[] = [];
     const walk = (directory: string, kind: 'spec' | 'plan'): void => {
       const path = this.path(directory);
@@ -60,7 +61,15 @@ export class Project {
     const source = `specwriter/work/${workId}/proposal.md`;
     const content = readFileSync(this.path(source), 'utf8');
     sources.push({ id: source, kind: 'proposal', source, reason: '本轮作者意图', content, hash: hash(content), protection: 'protected' });
+    if (chapter !== undefined) {
+      const source = this.chapterPaths(workId, chapter).intent;
+      const content = readFileSync(this.path(source), 'utf8');
+      sources.push({ id: source, kind: 'intent', source, reason: '当前章纲与信息边界；变化后须刷新上下文并重新审阅', content, hash: hash(content), protection: 'protected' });
+    }
     return sources;
+  }
+  private ensureIntent(chapter: number, workId: string, query = '') {
+    writeNew(this.path(this.chapterPaths(workId, chapter).intent), `# 第 ${chapter} 章意图\n\n## 本章目标\n\n${query}\n\n## 冲突与场景安排\n\n## 人物与信息边界\n\n## 必须保留与避免\n\n## 章末变化与伏笔\n`);
   }
   private fingerprint(sources: ContextSource[]): string {
     return hash(json({ config: loadConfig(this.root), sources: sources.map(item => [item.source, item.hash]) }));
@@ -85,20 +94,21 @@ export class Project {
     const works = this.store.works();
     const pending = works.filter(work => work.status === 'active').flatMap(work => {
       const result: { workId: string; chapter: number; stage: string; needsRefresh: boolean }[] = [];
-      const inputs = this.inputSources(work.id);
       for (let chapter = work.fromChapter; chapter <= work.toChapter; chapter++) {
         const paths = this.chapterPaths(work.id, chapter);
         if (!existsSync(this.path(paths.context))) continue;
         let needsRefresh = true;
+        let preparedContext: ContextPackage | undefined;
         try {
           const context = readJson<ContextPackage>(this.path(paths.context));
-          needsRefresh = context.generation !== generation || context.inputFingerprint !== this.fingerprint(inputs);
+          preparedContext = context;
+          needsRefresh = context.generation !== generation || context.inputFingerprint !== this.fingerprint(this.inputSources(work.id, chapter));
         } catch { /* report broken draft context */ }
         const revision = revisions.find(item => item.chapter === chapter);
         // A work may contain a prepared revision of an already accepted chapter.
         if (revision?.workId === work.id && !revision.stale) {
           const draftPath = this.path(paths.draft);
-          if (existsSync(draftPath) && hash(readFileSync(draftPath, 'utf8')) === revision.bodyHash) continue;
+          if (existsSync(draftPath) && hash(readFileSync(draftPath, 'utf8')) === revision.bodyHash && preparedContext && json(preparedContext) === json(revision.context)) continue;
         }
         result.push({ workId: work.id, chapter, stage: existsSync(this.path(paths.draft)) && readFileSync(this.path(paths.draft), 'utf8').trim() ? 'draft' : 'prepared', needsRefresh });
       }
@@ -124,8 +134,9 @@ export class Project {
       const config = loadConfig(this.root);
       positiveInteger(options.budget ?? config.contextBudgetChars, 'budget');
       const query = config.memory!.backend === 'microsoft-graphrag' ? options.query?.trim() || defaultMemoryQuery : options.query ?? '';
+      this.ensureIntent(chapter, workId, query);
       return { chapter, atChapter: chapter - 1, query, backend: config.memory!.backend, method: config.memory!.method!, autoIndex: config.memory!.autoIndex!,
-        token: hash(json({ generation: this.store.generation(), inputs: this.fingerprint(this.inputSources(workId)), chapter, workId })) };
+        token: hash(json({ generation: this.store.generation(), inputs: this.fingerprint(this.inputSources(workId, chapter)), chapter, workId })) };
     });
   }
   propose(workId: string, title: string, from: number, to: number): WorkItem {
@@ -167,11 +178,11 @@ export class Project {
     const selectedEpisodes = [...fullMemory.episodes].sort((a, b) => Number(selectedNodeIds.has(b.id)) - Number(selectedNodeIds.has(a.id)) || b.sourceChapter - a.sourceChapter).slice(0, 20);
     const selectedEntities = fullMemory.entities.filter(entity => selectedNodeIds.has(entity.id) || recentCharacters.has(entity.name) || recentCharacters.has(entity.id));
     const memory = { ...fullMemory, facts: rankedFacts, hooks: rankedHooks, entities: selectedEntities, episodes: selectedEpisodes, resources: fullMemory.resources.filter(resource => queryTerms.has(resource.entity) || selectedNodeIds.has(json([resource.entity, resource.resource]).trim())), timeline: fullMemory.timeline.slice(-20), summaries: fullMemory.summaries.slice(-5) };
-    const inputs = this.inputSources(workId);
+    const inputs = this.inputSources(workId, chapter);
     const baseRevision = revisions.find(item => item.chapter === chapter)?.id ?? null;
     const selected: ContextSource[] = inputs.filter(item => item.protection === 'protected');
     const context: ContextPackage = {
-      schemaVersion: 1, chapter, workId, baseRevision, generation: this.store.generation(),
+      schemaVersion: 1, contractVersion: 2, intentHash: inputs.find(item => item.kind === 'intent')!.hash, chapter, workId, baseRevision, generation: this.store.generation(),
       inputFingerprint: this.fingerprint(inputs), query, budgetChars, selectedChars: 0,
       memory, memorySelection: { strategy: microsoft ? 'microsoft-graphrag' : 'hybrid-graphrag', totalActiveFacts: activeFacts.length, selectedFacts: memory.facts.length, totalHooks: fullMemory.hooks.length, selectedHooks: memory.hooks.length, totalEpisodes: fullMemory.episodes.length, selectedEpisodes: memory.episodes.length },
       retrieval: { engine: microsoft ? 'microsoft-graphrag' : retrieval.engine, snapshotId: retrieval.snapshotId, hops: retrieval.hops, seedIds: retrieval.seedIds, paths: retrieval.paths.slice(0, 8),
@@ -210,6 +221,12 @@ export class Project {
       }
     }
     const hits = this.store.search(query, chapter - 1, 8);
+    for (const citation of semantic?.sources ?? []) {
+      if (!citation.excerpt || hits.some(hit => hit.revision === citation.revision && hit.excerpt.includes(citation.excerpt))) continue;
+      const revision = revisions.find(item => item.id === citation.revision && item.chapter === citation.chapter && item.bodyHash === citation.bodyHash);
+      if (!revision || revision.chapter >= chapter || !revision.body.includes(citation.excerpt)) throw new Error('Semantic citation is outside this chapter prefix');
+      hits.unshift({ chapter: citation.chapter, revision: citation.revision, source: `manuscript/chapters/${chapterId(citation.chapter)}.md`, line: revision.body.slice(0, revision.body.indexOf(citation.excerpt)).split('\n').length, excerpt: citation.excerpt, score: 0 });
+    }
     // Recent prose is useful even when the chapter goal has no searchable keywords.
     if (!hits.length && chapter > 1) {
       const previous = revisions.find(item => item.chapter === chapter - 1)!;
@@ -233,7 +250,8 @@ export class Project {
   }
   private prepareArtifacts(chapter: number, workId: string, options: { query?: string; budget?: number; refresh?: boolean; expectedToken?: string }) {
     this.assertWork(workId, chapter); this.assertClean();
-    const token = hash(json({ generation: this.store.generation(), inputs: this.fingerprint(this.inputSources(workId)), chapter, workId }));
+    this.ensureIntent(chapter, workId, options.query);
+    const token = hash(json({ generation: this.store.generation(), inputs: this.fingerprint(this.inputSources(workId, chapter)), chapter, workId }));
     if (options.expectedToken && options.expectedToken !== token) throw new Error('Book or creative inputs changed during GraphRAG preparation; retry prepare with current inputs');
     const paths = this.chapterPaths(workId, chapter);
     const config = loadConfig(this.root);
@@ -245,10 +263,11 @@ export class Project {
       if (old.contextHash !== context.contextHash) throw new Error('Prepared context changed; use prepare --refresh. Draft is preserved; extraction and review will be reset.');
     }
     const delta = {
-      schemaVersion: 1, chapter, baseRevision: context.baseRevision, contextHash: context.contextHash, draftHash: '',
+      schemaVersion: 2, chapter, baseRevision: context.baseRevision, contextHash: context.contextHash, intentHash: context.intentHash, draftHash: '',
       title: '', summary: '', characters: [], key_events: [], timeline_events: [], foreshadow_updates: [], relationship_changes: [], state_changes: [], cast_intros: [], facts: [], entities: [], narrative_events: [], resource_changes: []
     };
-    const review = { schemaVersion: 1, chapter, contextHash: context.contextHash, draftHash: '', reviewed: false, issues: [], notes: [] };
+    const review = { schemaVersion: 2, chapter, contextHash: context.contextHash, intentHash: context.intentHash, draftHash: '', reviewed: false, issues: [], notes: [],
+      checks: { evidence: { checked: false, notes: [] }, coverage: { checked: false, notes: [] }, continuity: { checked: false, notes: [] } } };
     const reset = (path: string, value: string): void => {
       if (options.refresh) {
         if (existsSync(path)) writeNew(`${path}.${hash(readFileSync(path, 'utf8')).slice(0, 12)}.bak`, readFileSync(path, 'utf8'));
@@ -257,7 +276,6 @@ export class Project {
     };
     atomicWrite(contextPath, json(context));
     reset(this.path(paths.delta), json(delta)); reset(this.path(paths.review), json(review));
-    writeNew(this.path(paths.intent), `# 第 ${chapter} 章意图\n\n## 本章目标\n\n${options.query ?? ''}\n\n## 冲突与场景安排\n\n## 人物与信息边界\n\n## 必须保留与避免\n\n## 章末变化与伏笔\n`);
     const existing = this.store.revisions().find(item => item.chapter === chapter);
     writeNew(this.path(paths.draft), existing?.body ?? '');
     return { chapter, workId, paths, contextHash: context.contextHash, baseRevision: context.baseRevision };
@@ -265,7 +283,7 @@ export class Project {
   hashes(chapter: number, workId: string) {
     const paths = this.chapterPaths(workId, chapter);
     const context = readJson<ContextPackage>(this.path(paths.context));
-    return { chapter, baseRevision: context.baseRevision, contextHash: context.contextHash, draftHash: hash(readFileSync(this.path(paths.draft), 'utf8')) };
+    return { chapter, baseRevision: context.baseRevision, contextHash: context.contextHash, intentHash: hash(readFileSync(this.path(paths.intent), 'utf8')), draftHash: hash(readFileSync(this.path(paths.draft), 'utf8')) };
   }
   private verified(chapter: number, workId: string) {
     const paths = this.chapterPaths(workId, chapter);
@@ -278,6 +296,7 @@ export class Project {
     const delta: unknown = readJson(this.path(paths.delta));
     const review: unknown = readJson(this.path(paths.review));
     validateDelta(delta, body); validateReview(review);
+    if (context.contractVersion === 2 && (delta.schemaVersion !== 2 || review.schemaVersion !== 2 || delta.intentHash !== context.intentHash || review.intentHash !== context.intentHash)) throw new Error('Prepared V2 chapters require V2 extraction/review bound to the current intentHash');
     if (delta.chapter !== chapter || review.chapter !== chapter) throw new Error('Chapter identity mismatch');
     if (delta.baseRevision !== context.baseRevision) throw new Error('Delta baseRevision mismatch');
     for (const item of [delta, review]) {
@@ -348,7 +367,8 @@ export class Project {
     return this.store.transaction(() => {
       this.assertClean();
       const revisions = this.store.revisions();
-      return visibleGraph(this.graphSnapshot(replay(revisions, atChapter), revisions), holder);
+      const state = replay(revisions, atChapter);
+      return visibleGraph(this.graphSnapshot(state, revisions), holder === undefined ? undefined : resolveEntityReference(state, holder));
     });
   }
   query(query: string, options: { at?: number; holder?: string; limit?: number; hops?: number; expectedSnapshotId?: string } = {}) {
@@ -356,12 +376,13 @@ export class Project {
       this.assertClean();
       const revisions = this.store.revisions();
       const state = replay(revisions, options.at);
-      const graph = retrieveGraph(this.graphSnapshot(state, revisions), query, { holder: options.holder, hops: options.hops });
+      const holder = options.holder === undefined ? undefined : resolveEntityReference(state, options.holder);
+      const graph = retrieveGraph(this.graphSnapshot(state, revisions), query, { holder, hops: options.hops });
       if (options.expectedSnapshotId && graph.snapshotId !== options.expectedSnapshotId) throw new Error('Accepted chapters changed before structural memory retrieval; retry the semantic query');
       const factIds = new Set(graph.edges.flatMap(edge => edge.factId ? [edge.factId] : []));
       const facts = currentFacts(state).filter(fact => factIds.has(fact.id));
       const recordIds = new Set(graph.nodes.flatMap(node => node.recordId ? [node.recordId] : []));
-      const episodes = state.episodes.filter(event => recordIds.has(event.id) && (event.scope === 'world' || event.holder === options.holder));
+      const episodes = state.episodes.filter(event => recordIds.has(event.id) && (event.scope === 'world' || (event.holder !== null && resolveEntityReference(state, event.holder, false) === holder)));
       const entities = state.entities.filter(entity => recordIds.has(entity.id));
       const hooks = state.hooks.filter(hook => recordIds.has(hook.id));
       const resources = state.resources.filter(resource => recordIds.has(json([resource.entity, resource.resource]).trim()));

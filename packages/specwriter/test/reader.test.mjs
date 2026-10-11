@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { request as httpRequest } from 'node:http';
 import test from 'node:test';
 import { Project, NovelReader, initProject, startReader, hash, configureMemory } from '../dist/index.js';
+import { extraction, assessment } from './contract-fixture.mjs';
 
 const load = path => JSON.parse(readFileSync(path, 'utf8'));
 const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
@@ -22,8 +23,8 @@ function draft(project, root, chapter, body, work = 'opening') {
   const paths = Object.fromEntries(Object.entries(result.paths).map(([key, path]) => [key, join(root, path)]));
   writeFileSync(paths.draft, body);
   const metadata = project.hashes(chapter, work);
-  writeFileSync(paths.delta, JSON.stringify({ ...load(paths.delta), ...metadata, title: `废井来信 ${chapter}`, summary: '林舟收到一封信。', characters: ['林舟'], key_events: [{ description: '林舟收到信', evidence: { quote: body } }] }));
-  writeFileSync(paths.review, JSON.stringify({ ...load(paths.review), chapter, contextHash: metadata.contextHash, draftHash: metadata.draftHash, reviewed: true }));
+  writeFileSync(paths.delta, JSON.stringify(extraction({ ...load(paths.delta), ...metadata, title: `废井来信 ${chapter}`, summary: '林舟收到一封信。', characters: ['林舟'], key_events: [{ description: '林舟收到信', evidence: { quote: body } }] }, body)));
+  writeFileSync(paths.review, JSON.stringify(assessment(load(paths.review), metadata)));
   return paths;
 }
 function input(chapter, note = '此处让人物多一些迟疑。', quote = '', start = 0) {

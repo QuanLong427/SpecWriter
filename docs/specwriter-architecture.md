@@ -19,7 +19,7 @@ Codex + 项目级 SpecWriter Skills
           └── 可重建投影：正文 Markdown、实体、事件、资源、状态、认知、伏笔、时间线、摘要
 ```
 
-旧网页与后端不参与该包。第一版固定工作流，不实现通用工作流引擎、模型调度平台或多 Agent 服务。
+CLI、WriterMemory 和本地阅读服务集中在 packages/specwriter，阅读器使用原生 HTML/CSS/JS。当前采用固定工作流，不实现通用工作流引擎、模型调度平台或多 Agent 服务。
 
 ## 四种信息
 
@@ -40,6 +40,8 @@ Spec 与 Plan 可供 Codex 创作，但不能成为事件发生的证据。模�
 
 `archive` 要求整个范围已接纳且记忆同步，保存工作文档快照和正式版本清单；不改变事实内容，也不把计划事件转成记忆。工作原目录保留，数据库工作状态是权威，归档快照保持当时内容。
 
+v0.5 的 context.contractVersion、delta.schemaVersion 与 review.schemaVersion 使用 2。intent 是受保护输入，inputFingerprint 和 intentHash 绑定章纲；修改后必须 refresh。证据 basis 区分 established/reported/inferred/imagined，重复引用需要精确 UTF-16 偏移；世界事实要求 established。审阅分别记录证据支持、提取覆盖和连续性检查的依据，CLI 检查完成标志与非空记录，不机械证明语义。已接纳的版本 1 按旧规则重放，未完成草稿刷新后升级。
+
 ## 时间与修订
 
 事实保存来源章节、来源版本、引用及自动计算的原文行号。当前状态变化记录 `validFromChapter`、`validUntilChapter`；这些是正文揭露范围，不是故事内时间。故事内时间由 timeline 的文本记录，复杂倒叙的因果顺序暂由 Codex 判断。
@@ -58,9 +60,21 @@ Spec 与 Plan 可供 Codex 创作，但不能成为事件发生的证据。模�
 
 Microsoft GraphRAG 3.3.x 是默认检索后端：setup 使用官方 init，export 从 SQLite 导出指定已接纳前缀正文，index/query 使用独立 input/output/cache/vector_store/prompts。每个前缀版本有独立社区报告，禁止先索引未来再过滤查询。完成索引后写 ready 标记和语料/配置/提示词/产物校验值，操作结束再次检查正式版本，拒绝并发返修产生的过期结果。模型回答是作者视角的 advisory，不进入事实源。字段矩阵、安装和操作见 [记忆协议](../packages/specwriter/assets/memory.md)。
 
+v0.5 图计算 kernelVersion=2：版本 2 提取将已登记名称与别名解析到稳定 ID，统一状态、关系、资源、事件与认知持有人；冲突名称拒绝自动消歧。旧正式版本不重写，未知名称仍保留原文。派生快照身份变化，旧索引不能用作新上下文。
+
+增量索引仅选择正文 revision/bodyHash 与当前前缀一致、配置与产物经过校验的较早快照。父索引加锁后复制 output/cache，子快照运行官方 update，父向量与社区报告不变。原文按 bodyHash 保存只读对象并优先硬链接到 input；可变输出始终复制。默认保留当前版本链最近 2 个索引以及 pending context 所依赖的索引；清理保留数据库、正文对象、manifest、查询记录。全文校验/加载、输出复制与社区合并仍有规模成本。job.json 与 stderr 记录阶段，取消等待子进程结束后释放锁；recover 只清除确认已停止进程的锁。
+
+引用映射在本地读取 GraphRAG parquet，将 Sources/Entities/Relationships/Reports 关联到 text_units/document/manifest，核对正文版本与哈希，返回可逐字匹配的片段，未知引用单独报告。query 和 context 保留模型回答的 advisory 身份，引用映射不能证明模型推断正确。
+
 `WriterMemory.prepare/query` 是异步默认入口。prepare 先用短事务检查章节、工作状态、作者输入与 generation，随后在事务外按配置 autoIndex 建立/复用前缀索引并取回查询回答，最后在短事务中再次检查初始输入指纹，编译上下文与章节文件。首章前缀为空，不调用 Python 或模型；失败不静默回退。显式 local 模式跳过 Microsoft，仍使用正式状态与本地检索。
 
 查询记录的缓存键含 snapshotId、provider version、configHash、outputHash、query 和 method；正文/配置/索引变化使缓存失效。context 的 kind=retrieval 来源保存预算内的回答片段，完整回答保留在私有查询记录。verify/commit 只检查同一记录与索引的完整性、重算确定性上下文，不重新生成答案，不在 SQLite 事务内调用模型。新项目和缺少 memory 配置的旧项目默认 Microsoft；显式 local 配置保留。切换配置后旧候选需 refresh 并重新提取审阅。
+
+## 实验与观测
+
+GraphRAG index/update/query 通过版本绑定 observer 采集逐请求数值，排除本地缓存重放的历史 usage。操作开始先写 running/unknown 记录，结束写 coverage；缺失、失败、重试、取消保持未知。用量记录在索引清理之外保存，不包含 Codex 写作/提取/审阅成本。凭据不进入报告；费用使用用户提供的单价估算，需核对供应商账单。
+
+benchmark 使用独立 preflight 与四组实验小说，比较全量重建、仅缓存、增量更新、结构化查询；不修改生产小说。默认离线编排夹具，真实调用显式选择 live。标准答案与评分不发给模型，机械检查引用/版本边界，人工核对语义正确性。评分绑定答案与上下文哈希，未评分不记通过；百万字、续写质量与按批次更新仍需后续实验。详见 [实验与用量说明](../packages/specwriter/assets/benchmark.md)。
 
 ## 文件与恢复
 
@@ -77,5 +91,7 @@ NovelReader 从 SQLite 的正式 revision 读取正文，按 trustedPrefix 标�
 批注每条保存为 specwriter/feedback/<UUID>.json，绑定正文哈希、章节 key、revision、原文引用和字符偏移，保存时校验当前版本；版本变化后标 outdated，保留原意见。用户把修订请求带回 Codex，Skills 通过 feedback CLI 获取同一记录并核对版本，修订继续使用原有 prepare/verify/commit 闭环。
 
 正式交付按单次事务快照导出连续有效章节为 TXT/Markdown/独立 HTML，附版本清单。生成文件被手工修改时拒绝覆盖。阅读器保存作品至 exports/ 并下载副本，使内嵌浏览器也有可定位的产物。页面是原生 HTML/CSS/JS，无新增运行依赖，维护独立阅读偏好和进度。
+
+阅读偏好与正式/各工作包草稿位置保存在 `.specwriter/reader/preferences.json`，通过现有本地授权接口合并写入，SQLite 短事务串行化保存，不改变正式 generation。位置绑定 bodyHash，避免修订后套用旧偏移。浏览器缓存作为旧版兼容兜底；新书 bookId 随目录移动保持稳定。
 
 尚未实现：自动文学质量评估、导入整本外部小说的自动提取、独立写作 Agent、MCP、直接编辑正文的 Web UI、EPUB、复杂故事时间推理、百万字质量/性能基准。通过集成测试验证的是记忆与文件的机械一致性，不代表文学表现已获验证。

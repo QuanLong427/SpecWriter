@@ -4,10 +4,15 @@
   "type": "object", "additionalProperties": false,
   "required": ["schemaVersion", "chapter", "contextHash", "draftHash", "reviewed", "issues", "notes"],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "enum": [1, 2] },
     "chapter": { "type": "integer", "minimum": 1 },
     "contextHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "draftHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "intentHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "checks": {
+      "type": "object", "additionalProperties": false, "required": ["evidence", "coverage", "continuity"],
+      "properties": { "evidence": { "$ref": "#/$defs/check" }, "coverage": { "$ref": "#/$defs/check" }, "continuity": { "$ref": "#/$defs/check" } }
+    },
     "reviewed": { "type": "boolean" },
     "issues": {
       "type": "array",
@@ -25,5 +30,11 @@
       }
     },
     "notes": { "type": "array", "items": { "type": "string" } }
+  },
+  "allOf": [{ "if": { "properties": { "schemaVersion": { "const": 2 } } }, "then": { "properties": { "intentHash": { "$ref": "#/properties/intentHash" }, "checks": { "$ref": "#/properties/checks" } }, "required": ["intentHash", "checks"] } }],
+  "$defs": {
+    "check": { "type": "object", "additionalProperties": false, "required": ["checked", "notes"], "properties": {
+      "checked": { "type": "boolean" }, "notes": { "type": "array", "items": { "type": "string", "minLength": 1, "pattern": "\\S" } }
+    } }
   }
 }

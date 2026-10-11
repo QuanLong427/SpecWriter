@@ -1,4 +1,5 @@
 import { hash, json, positiveInteger } from './files.js';
+import { resolveEntityReference } from './entity-reference.js';
 import { currentFacts, terms, trustedPrefix } from './memory.js';
 import type { GraphEdge, GraphNode, GraphRetrieval, GraphSnapshot, MemoryState, Provenance, Revision } from './types.js';
 
@@ -7,7 +8,7 @@ export function graphIdentity(revisions: Revision[], atChapter: number) {
   const prefix = trustedPrefix(revisions);
   if (!Number.isSafeInteger(atChapter) || atChapter < 0 || atChapter > prefix.length) throw new Error('Graph chapter is beyond reconciled memory');
   const sourceRevisions = prefix.slice(0, atChapter).map(item => ({ chapter: item.chapter, revision: item.id, bodyHash: item.bodyHash, deltaHash: hash(json(item.delta)) }));
-  const snapshotId = hash(json({ kernelVersion: 1, atChapter, sourceRevisions }));
+  const snapshotId = hash(json({ kernelVersion: 2, atChapter, sourceRevisions }));
   return { snapshotId, sourceRevisions };
 }
 
@@ -42,6 +43,7 @@ export function buildGraph(state: MemoryState, revisions: Revision[]): GraphSnap
     return id;
   };
   const addEdge = (from: string, to: string, relation: string, kind: GraphEdge['kind'], provenance: Provenance, scope: 'world' | 'belief' = 'world', holder: string | null = null, extra: Partial<GraphEdge> = {}): void => {
+    holder = holder === null ? null : resolveEntityReference(state, holder, false);
     const id = hash(json({ from, to, relation, kind, provenance, scope, holder, extra }));
     edges.push({ id, from, to, relation, kind, sourceChapter: provenance.sourceChapter, sourceRevision: provenance.sourceRevision, evidence: provenance.evidence, evidenceLine: provenance.evidenceLine, scope, holder, ...extra });
   };
@@ -51,7 +53,7 @@ export function buildGraph(state: MemoryState, revisions: Revision[]): GraphSnap
   }
   for (const episode of state.episodes) {
     const id = `event:${episode.id}`;
-    nodes.set(id, { id, kind: 'event', recordId: episode.id, label: episode.description, aliases: [episode.id], description: episode.story_time ? `故事内时间：${episode.story_time}` : '', scope: episode.scope, holder: episode.holder, sourceChapter: episode.sourceChapter, sourceRevision: episode.sourceRevision, evidence: episode.evidence, evidenceLine: episode.evidenceLine });
+    nodes.set(id, { id, kind: 'event', recordId: episode.id, label: episode.description, aliases: [episode.id], description: episode.story_time ? `故事内时间：${episode.story_time}` : '', scope: episode.scope, holder: episode.holder === null ? null : resolveEntityReference(state, episode.holder, false), sourceChapter: episode.sourceChapter, sourceRevision: episode.sourceRevision, evidence: episode.evidence, evidenceLine: episode.evidenceLine });
   }
   for (const episode of state.episodes) {
     const id = `event:${episode.id}`;
@@ -74,7 +76,7 @@ export function buildGraph(state: MemoryState, revisions: Revision[]): GraphSnap
     nodes.set(id, { id, kind: 'resource', recordId: json([resource.entity, resource.resource]).trim(), label: `${resource.resource}=${resource.amount}`, aliases: [resource.resource], description: '当前有正文证据的资源余额', sourceChapter: resource.sourceChapter, sourceRevision: resource.sourceRevision, evidence: resource.evidence, evidenceLine: resource.evidenceLine });
     addEdge(resolveEntity(resource.entity), id, 'owns-resource', 'resource', resource);
   }
-  return { schemaVersion: 1, kernelVersion: 1, ...identity, atChapter: state.atChapter, nodes: [...nodes.values()].sort((a, b) => a.id.localeCompare(b.id)), edges: edges.sort((a, b) => a.id.localeCompare(b.id)) };
+  return { schemaVersion: 1, kernelVersion: 2, ...identity, atChapter: state.atChapter, nodes: [...nodes.values()].sort((a, b) => a.id.localeCompare(b.id)), edges: edges.sort((a, b) => a.id.localeCompare(b.id)) };
 }
 
 export function visibleGraph(snapshot: GraphSnapshot, holder?: string): GraphSnapshot {
