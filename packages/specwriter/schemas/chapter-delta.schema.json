@@ -1,0 +1,140 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://specwriter.local/schemas/chapter-delta-v1",
+  "$comment": "Modified adaptation of voocel/ainovel-cli internal/chapterfacts/facts.go at 638ca2445969b055a1013fedf8bf41c9d0b65c2a (Apache-2.0). Added provenance, revision/context binding, belief scope, entities, causal events, resources, facts and hook dependencies/defer/supersede. See THIRD_PARTY_NOTICES.md.",
+  "title": "SpecWriter evidence-backed chapter delta",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "chapter", "baseRevision", "contextHash", "draftHash", "title", "summary", "characters", "key_events", "timeline_events", "foreshadow_updates", "relationship_changes", "state_changes", "cast_intros", "facts"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "chapter": { "type": "integer", "minimum": 1 },
+    "baseRevision": { "type": ["integer", "null"], "minimum": 1 },
+    "contextHash": { "$ref": "#/$defs/hash" },
+    "draftHash": { "$ref": "#/$defs/hash" },
+    "title": { "$ref": "#/$defs/text" },
+    "summary": { "$ref": "#/$defs/text" },
+    "characters": { "type": "array", "items": { "$ref": "#/$defs/text" }, "uniqueItems": true },
+    "key_events": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["description", "evidence"],
+        "properties": { "description": { "$ref": "#/$defs/text" }, "evidence": { "$ref": "#/$defs/evidence" } }
+      }
+    },
+    "timeline_events": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["time", "event", "characters", "evidence"],
+        "properties": {
+          "time": { "$ref": "#/$defs/text" }, "event": { "$ref": "#/$defs/text" },
+          "characters": { "type": "array", "items": { "$ref": "#/$defs/text" } }, "evidence": { "$ref": "#/$defs/evidence" }
+        }
+      }
+    },
+    "foreshadow_updates": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["id", "action", "description", "evidence"],
+        "properties": {
+          "id": { "$ref": "#/$defs/text" }, "action": { "enum": ["plant", "advance", "resolve", "defer", "supersede"] },
+          "expected_payoff": { "$ref": "#/$defs/text" },
+          "depends_on": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/text" } },
+          "superseded_by": { "type": ["string", "null"] },
+          "description": { "type": ["string", "null"] }, "evidence": { "$ref": "#/$defs/evidence" }
+        }
+      }
+    },
+    "relationship_changes": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["character_a", "character_b", "relation", "evidence"],
+        "properties": {
+          "character_a": { "$ref": "#/$defs/text" }, "character_b": { "$ref": "#/$defs/text" },
+          "relation": { "$ref": "#/$defs/text" }, "evidence": { "$ref": "#/$defs/evidence" }
+        }
+      }
+    },
+    "state_changes": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["entity", "field", "old_value", "new_value", "reason", "scope", "holder", "evidence"],
+        "properties": {
+          "entity": { "$ref": "#/$defs/text" }, "field": { "$ref": "#/$defs/text" },
+          "old_value": { "type": ["string", "null"] }, "new_value": { "$ref": "#/$defs/text" },
+          "reason": { "type": ["string", "null"] }, "scope": { "enum": ["world", "belief"] },
+          "holder": { "type": ["string", "null"] }, "evidence": { "$ref": "#/$defs/evidence" }
+        }
+      }
+    },
+    "cast_intros": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["name", "brief_role", "evidence"],
+        "properties": {
+          "name": { "$ref": "#/$defs/text" }, "brief_role": { "$ref": "#/$defs/text" }, "evidence": { "$ref": "#/$defs/evidence" }
+        }
+      }
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "name", "type", "aliases", "description", "evidence"],
+        "properties": {
+          "id": { "$ref": "#/$defs/id" }, "name": { "$ref": "#/$defs/text" },
+          "type": { "enum": ["character", "location", "item", "faction", "concept"] },
+          "aliases": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/text" } },
+          "description": { "$ref": "#/$defs/text" }, "evidence": { "$ref": "#/$defs/evidence" }
+        }
+      }
+    },
+    "narrative_events": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "description", "story_time", "participants", "location", "causes", "scope", "holder", "evidence"],
+        "properties": {
+          "id": { "$ref": "#/$defs/id" }, "description": { "$ref": "#/$defs/text" },
+          "story_time": { "type": ["string", "null"] }, "location": { "type": ["string", "null"] },
+          "participants": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/text" } },
+          "causes": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+          "scope": { "enum": ["world", "belief"] }, "holder": { "type": ["string", "null"] },
+          "evidence": { "$ref": "#/$defs/evidence" }
+        }
+      }
+    },
+    "resource_changes": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["entity", "resource", "opening", "change", "closing", "evidence"],
+        "properties": {
+          "entity": { "$ref": "#/$defs/text" }, "resource": { "$ref": "#/$defs/text" },
+          "opening": { "type": "number" }, "change": { "type": "number" }, "closing": { "type": "number" },
+          "evidence": { "$ref": "#/$defs/evidence" }
+        }
+      }
+    },
+    "facts": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["subject", "predicate", "object", "scope", "holder", "evidence"],
+        "properties": {
+          "subject": { "$ref": "#/$defs/text" }, "predicate": { "$ref": "#/$defs/text" }, "object": { "$ref": "#/$defs/text" },
+          "scope": { "enum": ["world", "belief"] }, "holder": { "type": ["string", "null"] }, "evidence": { "$ref": "#/$defs/evidence" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+    "text": { "type": "string", "minLength": 1, "pattern": "\\S" },
+    "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "evidence": {
+      "type": "object", "additionalProperties": false, "required": ["quote"],
+      "properties": { "quote": { "$ref": "#/$defs/text" } }
+    }
+  }
+}

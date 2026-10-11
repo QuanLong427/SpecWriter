@@ -1,0 +1,204 @@
+// ChapterDelta adapts ainovel-cli's Apache-2.0 chapter-facts contract.
+// Modified: provenance, draft/context identity, temporal and belief scopes.
+// See ../THIRD_PARTY_NOTICES.md and ../licenses/ainovel-cli-Apache-2.0.txt.
+export interface Evidence { quote: string }
+export interface ScopedFact {
+  subject: string;
+  predicate: string;
+  object: string;
+  scope: 'world' | 'belief';
+  holder: string | null;
+  evidence: Evidence;
+}
+export interface EntityInput {
+  id: string;
+  name: string;
+  type: 'character' | 'location' | 'item' | 'faction' | 'concept';
+  aliases: string[];
+  description: string;
+  evidence: Evidence;
+}
+export interface NarrativeEventInput {
+  id: string;
+  description: string;
+  story_time: string | null;
+  participants: string[];
+  location: string | null;
+  causes: string[];
+  scope: 'world' | 'belief';
+  holder: string | null;
+  evidence: Evidence;
+}
+export interface ResourceChange {
+  entity: string;
+  resource: string;
+  opening: number;
+  change: number;
+  closing: number;
+  evidence: Evidence;
+}
+export interface ChapterDelta {
+  schemaVersion: 1;
+  chapter: number;
+  baseRevision: number | null;
+  contextHash: string;
+  draftHash: string;
+  title: string;
+  summary: string;
+  characters: string[];
+  key_events: { description: string; evidence: Evidence }[];
+  timeline_events: { time: string; event: string; characters: string[]; evidence: Evidence }[];
+  foreshadow_updates: { id: string; action: 'plant' | 'advance' | 'resolve' | 'defer' | 'supersede'; description: string | null; expected_payoff?: string; depends_on?: string[]; superseded_by?: string | null; evidence: Evidence }[];
+  relationship_changes: { character_a: string; character_b: string; relation: string; evidence: Evidence }[];
+  state_changes: { entity: string; field: string; old_value: string | null; new_value: string; reason: string | null; scope: 'world' | 'belief'; holder: string | null; evidence: Evidence }[];
+  cast_intros: { name: string; brief_role: string; evidence: Evidence }[];
+  facts: ScopedFact[];
+  entities?: EntityInput[];
+  narrative_events?: NarrativeEventInput[];
+  resource_changes?: ResourceChange[];
+}
+export interface ChapterReview {
+  schemaVersion: 1;
+  chapter: number;
+  contextHash: string;
+  draftHash: string;
+  reviewed: boolean;
+  issues: { id: string; kind: 'continuity' | 'spec' | 'craft'; severity: 'blocking' | 'warning' | 'suggestion'; description: string; resolved: boolean; resolution?: string }[];
+  notes: string[];
+}
+export interface Revision {
+  id: number;
+  chapter: number;
+  body: string;
+  bodyHash: string;
+  delta: ChapterDelta;
+  review: ChapterReview;
+  context: ContextPackage;
+  workId: string;
+  acceptedAt: string;
+  stale: boolean;
+}
+export interface MemoryFact extends ScopedFact {
+  id: string;
+  sourceChapter: number;
+  sourceRevision: number;
+  validFromChapter: number;
+  validUntilChapter: number | null;
+  evidenceLine: number;
+}
+export interface MemoryHook {
+  id: string;
+  description: string;
+  status: 'open' | 'progressing' | 'resolved' | 'deferred' | 'superseded';
+  startChapter: number;
+  sourceChapter: number;
+  sourceRevision: number;
+  evidence: Evidence;
+  expectedPayoff?: string;
+  dependsOn?: string[];
+  supersededBy?: string | null;
+}
+export interface Provenance { sourceChapter: number; sourceRevision: number; evidence: Evidence; evidenceLine: number }
+export interface MemoryEntity extends EntityInput, Provenance {}
+export interface MemoryEpisode extends NarrativeEventInput, Provenance { kind: 'key-event' | 'narrative-event' }
+export interface MemoryResource extends Provenance { entity: string; resource: string; amount: number }
+export interface MemoryState {
+  atChapter: number;
+  facts: MemoryFact[];
+  hooks: MemoryHook[];
+  timeline: { time: string; event: string; characters: string[]; evidence: Evidence; sourceChapter: number; sourceRevision: number }[];
+  summaries: { chapter: number; revision: number; title: string; summary: string; characters: string[] }[];
+  entities: MemoryEntity[];
+  episodes: MemoryEpisode[];
+  resources: MemoryResource[];
+}
+export interface ContextSource {
+  id: string;
+  kind: 'spec' | 'plan' | 'proposal' | 'prose' | 'retrieval';
+  source: string;
+  reason: string;
+  content: string;
+  hash: string;
+  chapter?: number;
+  revision?: number;
+  protection: 'protected' | 'compressible';
+}
+export interface ContextPackage {
+  schemaVersion: 1;
+  chapter: number;
+  workId: string;
+  baseRevision: number | null;
+  generation: number;
+  inputFingerprint: string;
+  query: string;
+  budgetChars: number;
+  selectedChars: number;
+  memory: MemoryState;
+  memorySelection: { strategy: 'query-recent-one-hop' | 'hybrid-graphrag' | 'microsoft-graphrag'; totalActiveFacts: number; selectedFacts: number; totalHooks: number; selectedHooks: number; totalEpisodes?: number; selectedEpisodes?: number };
+  retrieval?: { engine: 'writer-memory-graphrag' | 'microsoft-graphrag'; snapshotId: string; hops: number; seedIds: string[]; paths: GraphPath[]; status?: 'empty' | 'ready'; method?: GraphRagMethod; receiptId?: string; answerHash?: string; configHash?: string; outputHash?: string; answerTruncated?: boolean };
+  sources: ContextSource[];
+  contextHash: string;
+}
+export interface WorkItem {
+  id: string;
+  title: string;
+  fromChapter: number;
+  toChapter: number;
+  status: 'active' | 'archived';
+}
+export interface BookConfig {
+  schemaVersion: 1;
+  name: string;
+  language: 'zh' | 'en';
+  contextBudgetChars: number;
+  memory?: { backend: 'microsoft-graphrag' | 'local'; method?: GraphRagMethod; autoIndex?: boolean };
+}
+export type GraphRagMethod = 'local' | 'global' | 'drift' | 'basic';
+export interface RetrievalReceipt {
+  schemaVersion: 1; id: string; provider: 'microsoft-graphrag'; version: string;
+  snapshotId: string; atChapter: number; method: GraphRagMethod; query: string;
+  configHash: string; outputHash: string; answer: string; answerHash: string;
+}
+export interface GraphNode extends Partial<Provenance> {
+  id: string;
+  kind: 'entity' | 'value' | 'event' | 'hook' | 'resource';
+  label: string;
+  aliases: string[];
+  description: string;
+  recordId?: string;
+  entityType?: EntityInput['type'];
+  scope?: 'world' | 'belief';
+  holder?: string | null;
+}
+export interface GraphEdge extends Provenance {
+  id: string;
+  from: string;
+  to: string;
+  relation: string;
+  kind: 'fact' | 'participant' | 'location' | 'causal' | 'dependency' | 'resource';
+  scope: 'world' | 'belief';
+  holder: string | null;
+  factId?: string;
+  recordId?: string;
+}
+export interface GraphSnapshot {
+  schemaVersion: 1;
+  kernelVersion: 1;
+  snapshotId: string;
+  atChapter: number;
+  sourceRevisions: { chapter: number; revision: number; bodyHash: string; deltaHash: string }[];
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+export interface GraphPath { nodeIds: string[]; edgeIds: string[] }
+export interface GraphRetrieval {
+  engine: 'writer-memory-graphrag';
+  snapshotId: string;
+  atChapter: number;
+  hops: number;
+  seedIds: string[];
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  paths: GraphPath[];
+  truncated: boolean;
+}

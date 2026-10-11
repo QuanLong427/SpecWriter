@@ -1,160 +1,30 @@
-# AI小说转剧本工具
+# SpecWriter
 
-一款基于多Agent架构的网络小说转剧本Web应用，通过AI流水线将小说智能转换为专业剧本格式。
+SpecWriter 是面向 Codex 的长篇小说创作工作流，WriterMemory 是其长期记忆模块。通过创作约定、滚动计划、正文审阅和有证据的记忆提交，帮助 Agent 在新会话和长篇写作中恢复人物、伏笔与剧情状态。
 
-## 功能特性
+当前已经实现本地 CLI、7 个 Codex Skills、4 份创作约定模板、版本化的正文和记忆提交闭环。WriterMemory 默认使用 Microsoft GraphRAG 检索，并保留带证据的结构化状态与显式离线模式。
 
-- **多Agent流水线**：故事骨架 → 改编策略 → 剧本编写 → 监督审核
-- **实时流式输出**：通过Socket.IO实时展示Agent思考和生成过程
-- **多AI支持**：支持OpenAI、Claude、DeepSeek等模型
-- **在线编辑**：所见即所得的剧本编辑器
-- **导出功能**：支持TXT格式导出
-- **角色管理**：自动识别和管理角色信息
-
-## 技术栈
-
-### 前端
-
-- React 18 + TypeScript
-- Tailwind CSS
-- Vite
-- Socket.IO Client
-
-### 后端
-
-- Node.js + Express
-- TypeScript
-- Prisma（ORM）
-- Vercel AI SDK（统一AI接口）
-- Socket.IO（实时通信）
-- MySQL（数据库）
-
-## 快速开始
-
-### 1. 克隆项目
-
-```bash
-git clone <repository-url>
-cd AwesomeWriter
-```
-
-### 2. 配置环境变量
-
-```bash
-cd backend
-cp .env.example .env
-# 编辑 .env 填入实际配置
-# 敏感信息（API Key）写在 .env.local 中
-```
-
-### 3. 启动后端
-
-```bash
-cd backend
+```powershell
 npm install
-npx prisma migrate dev  # 初始化数据库
-npm run dev
+npm run build
+node packages/specwriter/dist/cli.js init E:\novels\my-book --name "我的小说"
 ```
 
-后端服务将运行在 http://localhost:3001
+然后在 Codex 中打开小说目录，使用 `$specwriter-propose`、`$specwriter-write`、`$specwriter-commit` 等 Skills，或直接用自然语言安排创作。
 
-### 4. 启动前端
+默认后端需要 Python >=3.11,<3.14、`graphrag==3.3.0` 和模型凭据。运行 `memory graphrag setup --python EXE --model MODEL --embedding MODEL` 初始化供应商配置。第一章没有历史正文，跳过索引与模型检索；从第二章起 prepare 自动索引已接纳前缀并取回语义记忆。详见下方记忆文档。离线体验可在 init 时加 `--backend local`。
 
-```bash
-cd frontend
-npm install
-npm run dev
+- [安装、命令与使用说明](packages/specwriter/README.md)
+- [架构与数据边界](docs/specwriter-architecture.md)
+- [记忆记录与 GraphRAG 接入](packages/specwriter/assets/memory.md)
+- [复用代码与许可证](packages/specwriter/THIRD_PARTY_NOTICES.md)
+
+```powershell
+npm test
+npm run check
+npm run demo
 ```
 
-前端应用将运行在 http://localhost:5173
+要求 Node.js 24+。Codex 负责创作、提取和审阅；默认 Microsoft GraphRAG 提供向量、图和社区摘要检索，按已接纳章节前缀独立索引。正式状态和中文 SQLite FTS5/BM25 继续提供可核对的依据。MCP 和写作 Web 界面尚未实现。
 
-## 架构设计
-
-```
-用户 (React 前端)
-        │ Socket.IO (实时双向)
-        ▼
-决策层 Agent (orchestrator)
-        │
-  ┌─────┼─────┬─────────┐
-  ▼     ▼     ▼         ▼
-故事骨架 改编策略 剧本编写 监督审核
- Agent   Agent   Agent    Agent
-```
-
-每个Agent通过Vercel AI SDK调用AI模型，支持streaming输出和tool use。
-
-## 环境变量
-
-后端 `.env` 文件：
-
-```env
-# 数据库
-DATABASE_URL=mysql://root:password@localhost:3306/awesomewriter
-
-# AI配置
-AI_PROVIDER=openai
-AI_MODEL=
-
-# 服务器
-PORT=3001
-CORS_ORIGIN=http://localhost:5173
-```
-
-敏感信息（API Key）放在 `.env.local` 中：
-
-```env
-OPENAI_API_KEY=sk-xxx
-ANTHROPIC_API_KEY=sk-ant-xxx
-DEEPSEEK_API_KEY=sk-xxx
-```
-
-## 项目结构
-
-```
-AwesomeWriter/
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── AgentMessageStream.tsx  # Agent消息实时展示
-│   │   │   ├── ScriptPreview.tsx       # 剧本预览
-│   │   │   └── TextInput.tsx           # 文本输入
-│   │   ├── hooks/
-│   │   │   └── useSocket.ts            # Socket.IO Hook
-│   │   └── App.tsx
-│   └── package.json
-├── backend/
-│   ├── src/
-│   │   ├── agents/                     # Agent系统
-│   │   │   ├── types.ts                # 类型定义
-│   │   │   ├── orchestrator.ts         # 调度器
-│   │   │   └── scriptAgent/
-│   │   │       └── tools.ts            # Agent工具
-│   │   ├── socket/                     # Socket.IO
-│   │   │   ├── index.ts
-│   │   │   └── routes/agent.ts
-│   │   ├── services/
-│   │   │   └── ai.ts                   # AI SDK封装
-│   │   ├── routes/                     # REST API
-│   │   └── index.ts
-│   ├── prompts/                        # Agent提示词
-│   │   └── script_agent_decision.md
-│   ├── prisma/
-│   │   └── schema.prisma
-│   ├── .env.example
-│   └── package.json
-└── README.md
-```
-
-## 开发说明
-
-- 使用 `npm run dev` 启动开发服务器
-- 后端支持热重载
-- 前端使用Vite的HMR功能
-- 数据库变更后运行 `npx prisma migrate dev`
-
-## 注意事项
-
-- API Key仅存储在本地，不会上传到服务器
-- `.env.local` 已在 `.gitignore` 中，不会被提交
-- 生产环境请配置HTTPS
+项目代码位于 `packages/specwriter`。仓库原有 `frontend` 与 `backend` 是小说转剧本原型，保留供后续评估复用；历史说明见 [旧项目文档](docs/legacy-awesomewriter.md)。它们不参与 SpecWriter 的构建和测试。
