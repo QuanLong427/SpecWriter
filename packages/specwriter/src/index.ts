@@ -6,5 +6,8 @@ export { validateDelta, validateReview } from './validation.js';
 export { buildGraph, retrieveGraph, visibleGraph, graphIdentity } from './graphrag.js';
 export { MicrosoftGraphRag, runGraphRag } from './microsoft-graphrag.js';
 export { WriterMemory } from './writer-memory.js';
+export { NovelReader } from './reader.js';
+export { startReader } from './reader-server.js';
+export type { ReaderScope, ReaderChapter, ReaderFeedback } from './reader.js';
 export type { ProcessRunner, ProcessResult } from './microsoft-graphrag.js';
 export type * from './types.js';

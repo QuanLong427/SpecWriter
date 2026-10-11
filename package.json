@@ -1,7 +1,7 @@
 {
   "name": "specwriter-workspace",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Spec-driven long-form fiction with Codex and WriterMemory",
   "license": "MIT",
   "workspaces": ["packages/specwriter"],
@@ -9,6 +9,7 @@
     "build": "npm run build --workspace specwriter",
     "test": "npm run test --workspace specwriter",
     "check": "npm run check --workspace specwriter",
-    "demo": "node packages/specwriter/examples/offline-demo.mjs"
+    "demo": "node packages/specwriter/examples/offline-demo.mjs",
+    "reader:demo": "node packages/specwriter/examples/reader-demo.mjs"
   }
 }

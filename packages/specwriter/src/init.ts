@@ -70,6 +70,7 @@ export function initProject(rootPath: string, name = '未命名小说', options:
     managed(`${skillPath}/SKILL.md`, readFileSync(join(assetsRoot, 'skills', entry.name, 'SKILL.md'), 'utf8'));
     managed(`${skillPath}/references/protocol.md`, readFileSync(join(assetsRoot, 'protocol.md'), 'utf8'));
     managed(`${skillPath}/references/memory.md`, readFileSync(join(assetsRoot, 'memory.md'), 'utf8'));
+    managed(`${skillPath}/references/reader.md`, readFileSync(join(assetsRoot, 'reader.md'), 'utf8'));
     for (const schema of ['chapter-delta.schema.json', 'review.schema.json']) managed(`${skillPath}/references/${schema}`, readFileSync(join(schemasRoot, schema), 'utf8'));
     managed(`${skillPath}/references/THIRD_PARTY_NOTICES.md`, readFileSync(join(packageRoot, 'THIRD_PARTY_NOTICES.md'), 'utf8'));
     managed(`${skillPath}/references/licenses/ainovel-cli-Apache-2.0.txt`, readFileSync(join(packageRoot, 'licenses', 'ainovel-cli-Apache-2.0.txt'), 'utf8'));

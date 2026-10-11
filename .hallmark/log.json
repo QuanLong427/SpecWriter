@@ -1,0 +1,13 @@
+[
+  {
+    "date": "2026-10-11",
+    "macrostructure": "Long Document",
+    "theme": "Newsprint",
+    "nav": "N3 side rail",
+    "footer": "Ft2 inline",
+    "enrichment": "none",
+    "brief": "SpecWriter local novel reader, version-bound author annotations and export",
+    "critique": { "philosophy": 4, "hierarchy": 4, "execution": 4, "specificity": 5, "restraint": 5, "variety": 4 },
+    "responsiveChecked": [320, 375, 414, 768, 1280]
+  }
+]

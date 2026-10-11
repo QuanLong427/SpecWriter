@@ -1,0 +1,7 @@
+{
+  "date": "2026-10-11",
+  "scope": "packages/specwriter/assets/reader",
+  "sources": ["packages/specwriter/package.json", "frontend/src/index.css"],
+  "existing": { "framework": "TypeScript CLI; legacy React frontend is separate", "motion": "none", "designSystem": "none for the reader" },
+  "reader": { "framework": "buildless HTML/CSS/JS", "fonts": "native Chinese serif + native Chinese sans", "palette": "warm paper with red brown accent", "spacing": "4px scale", "tokens": "packages/specwriter/assets/reader/tokens.css" }
+}

@@ -28,6 +28,8 @@
 - `manuscript/drafts/<work>/<chapter>.md`：草稿。
 - `memory-delta.json` 与 `review.json`：候选事实与审阅记录。细节阅读本目录中的 JSON Schema。
 - `manuscript/chapters/*.md`：已接纳正文的可编辑投影；直接修改需要导入草稿并重新接纳。
+- `specwriter/feedback/*.json`：阅读器保存的版本绑定作者批注；按 [阅读协议](reader.md) 读取和处理，不作为正文事实。
+- `exports/novel.{txt,md,html}`：正式小说交付文件，由 export 从连续有效正文生成。
 - `specwriter/memory/views/*.md`：自动生成人物状态、认知、伏笔、时间线和摘要，不是第二份可手工维护的事实源。
 
 不要为了执行一个命令重写全部文档。全书保留方向，近期剧情展开细节；允许场景创造，偏离计划时记录原因并调整后续计划。

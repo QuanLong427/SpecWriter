@@ -106,18 +106,35 @@ TypeScript 默认入口是异步 `new WriterMemory(project).prepare/query`；同
 
 接纳正文与事实在同一 SQLite 事务中完成。文件投影在事务之后生成；若 commit 返回 `projectionNeedsSync: true`，数据库已经接纳，用 sync 恢复文件，不要再次提交。archive 关闭已完成工作包，不把计划变为事实；原工作目录保留，归档快照不会随后续修订改写。
 
+## 小说阅读、批注与交付
+
+在小说目录运行：
+
+```powershell
+node .specwriter/bin/specwriter.mjs read
+node .specwriter/bin/specwriter.mjs read --draft --work opening
+node .specwriter/bin/specwriter.mjs export --format html
+```
+
+read 自动打开浏览器；服务仅绑定本机，Ctrl+C 停止。目录支持正式/草稿切换、连续阅读、阅读进度、字号、行距、夜间主题、版本对照和段落批注。Codex 写完后刷新正文即可看到新内容，不要求 GraphRAG 或模型凭据。
+
+批注绑定正文版本与精确引用。按“复制给 Codex”粘贴修订请求，或直接让 Codex 使用 feedback list 读取意见；原文改变时旧批注标为过期。阅读器与 CLI 均可导出 TXT/Markdown/独立 HTML 到 exports/，只包含连续有效的正式章节；草稿与需要重审的后续章节排除。详见 [阅读协议](assets/reader.md)。现有小说重新运行 init 会安装新的阅读协议和更新未被作者改写的 Skills，保留正文与创作约定。
+
 ## 验证与当前范围
 
 ```powershell
 npm test
 npm run check
 npm run demo
+npm run reader:demo
 ```
 
 demo 使用内置示例正文，不调用 AI，并输出一个可检查的临时小说项目路径。
 
+reader:demo 生成有两章正式正文、一章草稿和示例批注的临时小说，打印本地阅读地址，不调用模型；打开地址预览，Ctrl+C 停止服务。
+
 可选兼容检查：`node packages/specwriter/examples/graphrag-smoke.mjs PATH/TO/PYTHON` 使用官方 GraphRAG 3.3.0 执行 init、离线配置 dry-run 和 query 帮助检查。它关闭模型连接验证，不执行真实索引/模型查询；完整问答需要有效供应商凭据。
 
-当前是可运行 MVP：Microsoft GraphRAG 默认用于准备和查询，本地结构化记忆负责正式状态依据并提供显式离线模式；没有独立写作 Agent、MCP 服务或 Web 编辑器。证据校验能确认引用存在，不能机械证明语义蕴含或文学质量；这些由 Codex 审阅。故事内时间暂为文本，不自动推断复杂倒叙关系。百万字规模的质量与性能尚未基准验证。
+当前是可运行 MVP：Microsoft GraphRAG 默认用于准备和查询，本地结构化记忆负责正式状态依据并提供显式离线模式；本地阅读器负责正文展示、批注与交付，没有独立写作 Agent、MCP 服务或直接修改正文的 Web 编辑器。证据校验能确认引用存在，不能机械证明语义蕴含或文学质量；这些由 Codex 审阅。故事内时间暂为文本，不自动推断复杂倒叙关系。百万字规模的质量与性能尚未基准验证。
 
 复用来源及许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

@@ -5,8 +5,11 @@ import { positiveInteger } from './files.js';
 import { Project } from './project.js';
 import { MicrosoftGraphRag } from './microsoft-graphrag.js';
 import { WriterMemory } from './writer-memory.js';
+import { NovelReader } from './reader.js';
+import { startReader } from './reader-server.js';
+import { spawn } from 'node:child_process';
 
-const help = `SpecWriter 0.3 — Codex fiction workflows + Microsoft GraphRAG WriterMemory
+const help = `SpecWriter 0.4 — Codex fiction workflows + WriterMemory + local novel reader
 
 Usage: specwriter <command> [arguments] [--root PATH] [--json]
 
@@ -42,6 +45,14 @@ Usage: specwriter <command> [arguments] [--root PATH] [--json]
   archive ID                    Close completed work without promoting plans to facts
   sync [--capture]              Rebuild projections; preserve direct edits as drafts
   doctor                        Check database, provenance and projected files
+  read [--draft --work ID] [--port N] [--no-open]
+                                Open the local novel reader; Ctrl+C stops its server
+  export [--format txt|md|html]   Export only reconciled accepted chapters to exports/
+  feedback list [--chapter N] [--work ID]
+                                Read version-bound author annotations for Codex
+  feedback request [--chapter N] [--work ID]
+                                Generate a revision request from open annotations
+  feedback resolve ID [--reopen] Mark an annotation handled, or reopen it
 
 Codex: $specwriter-explore / propose / write / review / revise / commit / archive
 Codex writes prose, extraction and review artifacts. Default prepare/query use Microsoft
@@ -51,7 +62,7 @@ interface Arguments { positional: string[]; flags: Map<string, string | boolean>
 function parseArguments(values: string[]): Arguments {
   const positional: string[] = [];
   const flags = new Map<string, string | boolean>();
-  const booleans = new Set(['json', 'help', 'refresh', 'capture']);
+  const booleans = new Set(['json', 'help', 'refresh', 'capture', 'draft', 'no-open', 'reopen']);
   for (let index = 0; index < values.length; index++) {
     const value = values[index]!;
     if (!value.startsWith('--')) { positional.push(value); continue; }
@@ -72,7 +83,8 @@ async function main(): Promise<void> {
   if (!command || command === 'help' || args.flags.has('help')) { process.stdout.write(help); return; }
   const allowed: Record<string, string[]> = {
     init: ['name', 'backend'], status: [], propose: ['title', 'from', 'to'], prepare: ['work', 'query', 'budget', 'refresh'],
-    hash: ['work'], verify: ['work'], commit: ['work'], memory: ['at', 'holder', 'limit', 'hops', 'python', 'model', 'embedding', 'method', 'backend', 'auto-index'], history: [], archive: [], sync: ['capture'], doctor: []
+    hash: ['work'], verify: ['work'], commit: ['work'], memory: ['at', 'holder', 'limit', 'hops', 'python', 'model', 'embedding', 'method', 'backend', 'auto-index'], history: [], archive: [], sync: ['capture'], doctor: [],
+    read: ['draft', 'work', 'port', 'no-open'], export: ['format'], feedback: ['chapter', 'work', 'reopen']
   };
   if (!allowed[command]) throw new Error(`Unknown command: ${command}`);
   for (const flag of args.flags.keys()) if (!['root', 'json', ...allowed[command]!].includes(flag)) throw new Error(`Unsupported option --${flag} for ${command}`);
@@ -110,6 +122,46 @@ async function main(): Promise<void> {
       case 'archive': count(1); print(project.archive(position(0, 'work id'))); break;
       case 'sync': count(0); print(project.sync({ capture: args.flags.has('capture') })); break;
       case 'doctor': { count(0); const result = project.doctor(); print(result); if (!result.healthy) process.exitCode = 1; break; }
+      case 'export': count(0); print(new NovelReader(project).writeExport((option('format') ?? 'txt') as 'txt' | 'md' | 'html')); break;
+      case 'read': {
+        count(0);
+        const draft = args.flags.has('draft');
+        if (!draft && option('work')) throw new Error('--work requires --draft');
+        const works = project.store.works().filter(item => item.status === 'active');
+        const work = option('work') ?? (draft && works.length === 1 ? works[0]!.id : undefined);
+        if (draft && !work) throw new Error('Choose a draft work with --work ID');
+        const port = option('port') === undefined ? undefined : Number(option('port'));
+        const running = await startReader(project, { draft, work, port });
+        print({ url: running.url, scope: draft ? 'draft' : 'accepted', workId: work ?? null, stop: 'Ctrl+C' });
+        if (!args.flags.has('no-open')) {
+          const child = process.platform === 'win32' ? spawn('rundll32.exe', ['url.dll,FileProtocolHandler', running.url], { windowsHide: true, stdio: 'ignore', detached: true })
+            : spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [running.url], { stdio: 'ignore', detached: true });
+          child.once('error', () => process.stderr.write(`Open ${running.url} in your browser.\n`)); child.unref();
+        }
+        await new Promise<void>((resolve, reject) => {
+          const stop = () => { running.close().then(resolve, reject); };
+          process.once('SIGINT', stop); process.once('SIGTERM', stop);
+          running.server.once('close', () => { process.off('SIGINT', stop); process.off('SIGTERM', stop); resolve(); });
+        });
+        break;
+      }
+      case 'feedback': {
+        const reader = new NovelReader(project), action = position(0, 'feedback action');
+        if (action === 'resolve') {
+          count(2);
+          if (option('chapter') || option('work')) throw new Error('Resolve feedback by its id');
+          print(reader.resolveFeedback(position(1, 'feedback id'), !args.flags.has('reopen')));
+        } else if (action === 'list' || action === 'request') {
+          count(1);
+          if (args.flags.has('reopen')) throw new Error('--reopen applies only to feedback resolve');
+          if (option('work') && !option('chapter')) throw new Error('--work requires --chapter');
+          const chapter = option('chapter') === undefined ? undefined : positiveInteger(option('chapter'), 'chapter');
+          const key = chapter === undefined ? undefined : option('work') ? `draft:${option('work')}:${chapter}` : `accepted:${chapter}`;
+          if (key) reader.chapter(key);
+          print(action === 'list' ? reader.feedback(key) : { text: reader.revisionRequest(key) });
+        } else throw new Error('Feedback action must be list, request or resolve');
+        break;
+      }
       case 'memory': {
         const subcommand = position(0, 'memory subcommand');
         let at: number | undefined;

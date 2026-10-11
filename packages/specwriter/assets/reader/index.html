@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="reader-token" content="READER_TOKEN">
+  <meta name="reader-scope" content="READER_SCOPE">
+  <meta name="reader-work" content="READER_WORK">
+  <title>READER_BOOK_NAME · SpecWriter</title>
+  <link rel="stylesheet" href="/reader.css">
+  <script src="/reader.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#reading">跳到正文</a>
+  <header class="topbar">
+    <a class="wordmark" href="/">SpecWriter<span>小说阅读</span></a>
+    <div class="toolbar">
+      <button id="refresh" type="button">刷新正文</button>
+      <button id="export-open" type="button">导出</button>
+    </div>
+  </header>
+  <div id="message" class="message" role="status" aria-live="polite" hidden></div>
+  <div class="workspace">
+    <aside class="catalog" aria-label="小说目录">
+      <p class="quiet">我的作品</p>
+      <h1 id="book-name">正在打开小说…</h1>
+      <p id="book-meta" class="quiet"></p>
+      <div class="mode" role="group" aria-label="正文类型">
+        <button id="accepted-mode" type="button" aria-pressed="true">正式正文</button>
+        <button id="draft-mode" type="button" aria-pressed="false">草稿预览</button>
+      </div>
+      <div id="work-field" hidden><label for="work">工作包</label><select id="work"></select></div>
+      <label for="chapter-picker" class="mobile-label">选择章节</label>
+      <select id="chapter-picker" class="mobile-picker"></select>
+      <nav id="chapter-list" aria-label="章节目录"></nav>
+      <p class="catalog-note">正文与批注保存在本机。<br>写完或修订后，刷新即可阅读。</p>
+    </aside>
+    <main id="reading" tabindex="-1">
+      <div class="reading-tools">
+        <span id="chapter-state" class="quiet"></span>
+        <div class="toolbar">
+          <button id="font-down" type="button" aria-label="减小字号">A−</button>
+          <button id="font-up" type="button" aria-label="增大字号">A＋</button>
+          <button id="line-height" type="button">行距</button>
+          <button id="theme" type="button" aria-pressed="false">夜间</button>
+          <button id="compare-open" type="button">版本对照</button>
+          <button id="annotation-open" type="button">批注</button>
+        </div>
+      </div>
+      <article>
+        <h2 id="chapter-title">从目录开始阅读</h2>
+        <p id="chapter-meta" class="quiet"></p>
+        <p id="chapter-warning" class="warning" hidden></p>
+        <div id="prose" class="prose" aria-busy="true"><p class="quiet">正在读取章节…</p></div>
+      </article>
+      <footer class="chapter-footer">
+        <button id="previous" type="button">← 上一章</button>
+        <span id="progress" class="quiet"></span>
+        <button id="next" type="button">下一章 →</button>
+      </footer>
+    </main>
+    <aside id="annotation-panel" class="feedback" aria-label="作者批注">
+      <h2>阅读批注</h2>
+      <p class="quiet">选中一段正文留下意见，或直接写整章反馈。</p>
+      <form id="feedback-form">
+        <blockquote id="quote">整章意见</blockquote>
+        <button id="clear-quote" type="button" hidden>改为整章意见</button>
+        <label for="note">修改意见</label>
+        <textarea id="note" rows="4" maxlength="5000" placeholder="例如：这里的对白太直白，保留人物的试探。" required aria-describedby="feedback-status"></textarea>
+        <button id="save-note" class="primary" type="submit">保存批注</button>
+        <p id="feedback-status" class="quiet" role="status">批注会绑定当前正文版本。</p>
+      </form>
+      <div class="feedback-heading"><h3>本章意见</h3><button id="copy-request" type="button">复制给 Codex</button></div>
+      <div id="feedback-list"></div>
+      <p class="quiet footnote">回到 Codex 粘贴修订请求，或说“按阅读批注修改”。</p>
+    </aside>
+  </div>
+  <dialog id="export-dialog" aria-labelledby="export-title">
+    <div class="dialog-heading"><h2 id="export-title">导出小说</h2><button type="button" data-close="export-dialog">关闭</button></div>
+    <p>导出当前有效的正式章节。草稿和需要重审的后续章节不会包含在内。</p>
+    <div class="export-options"><button type="button" data-export="txt">TXT 正文</button><button type="button" data-export="md">Markdown</button><button type="button" data-export="html">HTML 阅读页</button></div>
+    <p class="quiet">文件保存到小说目录的 exports/，并下载副本。HTML 可直接打开阅读。</p>
+  </dialog>
+  <dialog id="compare-dialog" aria-labelledby="compare-title">
+    <div class="dialog-heading"><h2 id="compare-title">版本对照</h2><button type="button" data-close="compare-dialog">关闭</button></div>
+    <label for="version-picker">选择已接纳版本</label><select id="version-picker"></select>
+    <p id="compare-summary" class="quiet"></p>
+    <div class="comparison"><section><h3>已接纳版本</h3><div id="old-prose" class="prose"></div></section><section><h3>当前阅读版本</h3><div id="new-prose" class="prose"></div></section></div>
+  </dialog>
+  <dialog id="request-dialog" aria-labelledby="request-title">
+    <div class="dialog-heading"><h2 id="request-title">发送给 Codex</h2><button type="button" data-close="request-dialog">关闭</button></div>
+    <p>复制下方内容，粘贴到小说项目的 Codex 对话中。</p>
+    <textarea id="request-text" rows="10" readonly aria-label="修订请求"></textarea>
+  </dialog>
+</body>
+</html>
