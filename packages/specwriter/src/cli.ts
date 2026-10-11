@@ -10,6 +10,7 @@ import { startReader } from './reader-server.js';
 import { spawn } from 'node:child_process';
 import { UsageLedger, validatePrices, type Prices } from './usage.js';
 import { readJson } from './files.js';
+import { BookVersions } from './versions.js';
 import { runBenchmark, scoreBenchmark, type BenchmarkArm } from './benchmark.js';
 
 const help = `SpecWriter 0.6 — Codex fiction workflows + WriterMemory + local novel reader
@@ -24,6 +25,7 @@ Usage: specwriter <command> [arguments] [--root PATH] [--json]
   prepare N --work ID [--query TEXT] [--budget CHARS] [--refresh]
                                 Compile context and prepare chapter artifacts
   hash N --work ID               Get draft/context hashes for extraction and review
+  review-requirements N --work ID List claim hashes/evidence and retrieval checks for review
   verify N --work ID             Validate evidence, freshness and blocking issues
   commit N --work ID             Accept prose and memory in one SQLite transaction
   memory show [--at N]           Show reconciled chapter-bounded memory (N may be 0)
@@ -45,7 +47,8 @@ Usage: specwriter <command> [arguments] [--root PATH] [--json]
                                 Aggregate version-bound human ratings and usage
   memory graphrag export [--at N]
                                 Export an immutable accepted-prose prefix (no model)
-  memory graphrag setup --python EXE --model MODEL --embedding MODEL
+  memory graphrag setup --python EXE --embedding MODEL [--model MODEL | --env-file FILE]
+                [--provider NAME --embedding-base URL --embedding-dimensions N --reconfigure]
                                 Initialize the default Microsoft GraphRAG 3.3.x provider
   memory graphrag index [--at N] [--rebuild]
                                 Incrementally extend a verified prefix; rebuild changed configuration
@@ -58,6 +61,12 @@ Usage: specwriter <command> [arguments] [--root PATH] [--json]
   memory graphrag query TEXT [--at N] [--method local|global|drift|basic]
                                 Retrieve an advisory answer from Microsoft GraphRAG
   history N                     List accepted chapter revisions
+  version init                  Enable independent local Git checkpoints and auto-save
+  version save [--message TEXT]  Save prose/specs/reviews and a consistent memory DB copy
+  version log                   List up to 50 checkpoints
+  version bundle --out NEW_FILE Export complete Git history for backup/migration
+  version restore HASH --to NEW_DIR [--bundle FILE]
+                                Restore and verify a new book directory; never overwrite
   archive ID                    Close completed work without promoting plans to facts
   sync [--capture]              Rebuild projections; preserve direct edits as drafts
   doctor                        Check database, provenance and projected files
@@ -78,7 +87,7 @@ interface Arguments { positional: string[]; flags: Map<string, string | boolean>
 function parseArguments(values: string[]): Arguments {
   const positional: string[] = [];
   const flags = new Map<string, string | boolean>();
-  const booleans = new Set(['json', 'help', 'refresh', 'capture', 'draft', 'no-open', 'reopen', 'rebuild', 'dry-run']);
+  const booleans = new Set(['json', 'help', 'refresh', 'capture', 'draft', 'no-open', 'reopen', 'rebuild', 'dry-run', 'reconfigure']);
   for (let index = 0; index < values.length; index++) {
     const value = values[index]!;
     if (!value.startsWith('--')) { positional.push(value); continue; }
@@ -99,7 +108,8 @@ async function main(): Promise<void> {
   if (!command || command === 'help' || args.flags.has('help')) { process.stdout.write(help); return; }
   const allowed: Record<string, string[]> = {
     init: ['name', 'backend'], status: [], propose: ['title', 'from', 'to'], prepare: ['work', 'query', 'budget', 'refresh'],
-    hash: ['work'], verify: ['work'], commit: ['work'], memory: ['at', 'holder', 'limit', 'hops', 'python', 'model', 'embedding', 'method', 'backend', 'auto-index', 'retain', 'keep', 'rebuild', 'dry-run', 'prices'], history: [], archive: [], sync: ['capture'], doctor: [],
+    hash: ['work'], verify: ['work'], commit: ['work'], memory: ['at', 'holder', 'limit', 'hops', 'python', 'model', 'embedding', 'env-file', 'provider', 'embedding-base', 'embedding-dimensions', 'reconfigure', 'method', 'backend', 'auto-index', 'retain', 'keep', 'rebuild', 'dry-run', 'prices'], history: [], archive: [], sync: ['capture'], doctor: [],
+    'review-requirements': ['work'], version: ['message', 'to', 'bundle', 'out'],
     benchmark: ['mode', 'dataset', 'out', 'provider', 'max-operations', 'arms', 'budget', 'method', 'run', 'ratings', 'prices'],
     read: ['draft', 'work', 'port', 'no-open'], export: ['format'], feedback: ['chapter', 'work', 'reopen']
   };
@@ -144,6 +154,22 @@ async function main(): Promise<void> {
         cases: result.cases.length, arms: result.arms, modelCalls: result.modelCalls, scheduledOperations: result.scheduledOperations, qualityEligible: result.qualityEligible, note: result.note }); }
     finally { process.off('SIGINT', stop); process.off('SIGTERM', stop); } return;
   }
+  if (command === 'version') {
+    count(2); const action = position(0, 'version action');
+    const flags: Record<string, string[]> = { init: [], save: ['message'], log: [], bundle: ['out'], restore: ['to', 'bundle'] };
+    if (!flags[action]) throw new Error('Version action must be init, save, log, bundle or restore');
+    for (const flag of args.flags.keys()) if (!['root', 'json', ...flags[action]!].includes(flag)) throw new Error(`Unsupported option --${flag} for version ${action}`);
+    if (action !== 'restore' && args.positional.length > 1) throw new Error('Too many positional arguments');
+    const root = option('root') ? resolve(option('root')!) : action === 'restore' && option('bundle') ? process.cwd() : findRoot(process.cwd());
+    const versions = new BookVersions(root);
+    if (action === 'restore') { print(versions.restore(position(1, 'checkpoint hash or HEAD'), option('to', true)!, option('bundle'))); return; }
+    if (action === 'log') { print(versions.log()); return; }
+    if (action === 'bundle') { print(versions.bundle(option('out', true)!)); return; }
+    const book = new Project(root);
+    try { print(action === 'init' ? versions.init(book) : versions.save(book, option('message'))); }
+    finally { book.close(); }
+    return;
+  }
   const project = new Project(option('root') ? resolve(option('root')!) : findRoot(process.cwd()));
   const controller = new AbortController();
   const cancel = () => controller.abort();
@@ -155,6 +181,7 @@ async function main(): Promise<void> {
       case 'propose': count(1); print(project.propose(position(0, 'work id'), option('title', true)!, positiveInteger(option('from', true), 'from'), positiveInteger(option('to', true), 'to'))); break;
       case 'prepare': count(1); print(await new WriterMemory(project).prepare(positiveInteger(position(0, 'chapter'), 'chapter'), option('work', true)!, { ...memoryOptions, query: option('query'), budget: option('budget') === undefined ? undefined : positiveInteger(option('budget'), 'budget'), refresh: args.flags.has('refresh') })); break;
       case 'hash': count(1); print(project.hashes(positiveInteger(position(0, 'chapter'), 'chapter'), option('work', true)!)); break;
+      case 'review-requirements': count(1); print(project.reviewRequirements(positiveInteger(position(0, 'chapter'), 'chapter'), option('work', true)!)); break;
       case 'verify': count(1); print(project.verify(positiveInteger(position(0, 'chapter'), 'chapter'), option('work', true)!)); break;
       case 'commit': count(1); print(project.commit(positiveInteger(position(0, 'chapter'), 'chapter'), option('work', true)!)); break;
       case 'history': count(1); print(project.store.history(positiveInteger(position(0, 'chapter'), 'chapter'))); break;
@@ -233,11 +260,13 @@ async function main(): Promise<void> {
           if (option('holder') || option('hops') || option('limit')) throw new Error('Microsoft GraphRAG returns author-level advisory answers; --holder, --hops and --limit apply only to local memory query');
           const provider = new MicrosoftGraphRag(project);
           const action = position(1, 'GraphRAG action');
-          const actionFlags: Record<string, string[]> = { setup: ['python', 'model', 'embedding'], index: ['at', 'rebuild'], query: ['at', 'method'], export: ['at'], status: ['at'], recover: ['at'], prune: ['keep', 'dry-run'] };
+          const actionFlags: Record<string, string[]> = { setup: ['python', 'model', 'embedding', 'env-file', 'provider', 'embedding-base', 'embedding-dimensions', 'reconfigure'], index: ['at', 'rebuild'], query: ['at', 'method'], export: ['at'], status: ['at'], recover: ['at'], prune: ['keep', 'dry-run'] };
           if (!actionFlags[action]) throw new Error('Unknown GraphRAG action');
           for (const flag of args.flags.keys()) if (!['root', 'json', ...actionFlags[action]!].includes(flag)) throw new Error(`Unsupported option --${flag} for GraphRAG ${action}`);
           if (action === 'export') { count(2); print(provider.export(at)); }
-          else if (action === 'setup') { count(2); print(await provider.setup({ python: option('python', true)!, model: option('model', true)!, embedding: option('embedding', true)! })); }
+          else if (action === 'setup') { count(2); print(await provider.setup({ python: option('python', true)!, model: option('model'), embedding: option('embedding', true)!,
+            envFile: option('env-file'), provider: option('provider'), embeddingBase: option('embedding-base'),
+            embeddingDimensions: option('embedding-dimensions') === undefined ? undefined : positiveInteger(option('embedding-dimensions'), 'embedding-dimensions'), reconfigure: args.flags.has('reconfigure') })); }
           else if (action === 'index') { count(2); print(await provider.index(at, { ...memoryOptions, rebuild: args.flags.has('rebuild') })); }
           else if (action === 'query') { count(3); print(await provider.query(position(2, 'query text'), { signal: controller.signal, at, method: option('method') as 'local' | 'global' | 'drift' | 'basic' | undefined })); }
           else if (action === 'status') { count(2); print(provider.inspect(at)); }

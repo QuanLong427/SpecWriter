@@ -11,6 +11,7 @@
 - `memory query "青铜钥匙" --at 1` 默认语义检索；`--method global` 可做全局分析。角色认知核对用 `memory query "师父" --backend local --at 1 --holder 林舟 --hops 2`；world 与原文仍是作者视角，不能当作角色已知清单。
 - 完善 intent 后 `prepare 1 --work opening-arc --refresh`，将章纲及视角边界重新纳入上下文；保留已写草稿。
 - `hash 1 --work opening-arc` 获取草稿、上下文与章纲哈希。该命令只读，不能证明旧提取结果仍有效。
+- `review-requirements 1 --work opening-arc` 在提取完成后获取逐项审阅的声明哈希、证据及检索核对要求。
 - `verify 1 --work opening-arc` 检查结构、原文证据、版本、状态前置条件和阻塞问题。
 - `commit 1 --work opening-arc` 接纳正文与记忆；`archive opening-arc` 关闭全部章节已完成的工作包。
 
@@ -52,6 +53,12 @@ memory-delta 中每条事件、状态变化、关系、伏笔、新人物和事�
 审阅 JSON 设置 `reviewed: true`，checks.evidence、checks.coverage、checks.continuity 均为 `{checked: true, notes: ["实际核对的依据与结论"]}`。分别核对证据是否支持结论、提取有无关键遗漏、历史与章纲/视角/信息边界是否连续；不能用空 notes 或示例文字代替实际审阅。issues 每项包含 id、kind（continuity/spec/craft）、severity（blocking/warning/suggestion）、description、resolved。resolved=true 时必须写 resolution。notes 记录带依据的整体观察，不伪造分数。CLI 校验检查已完成和记录存在，语义与文学判断仍由 Codex 完成。草稿或章纲有改动时，原来的 hash、提取和审阅都需重新生成。
 
 执行 verify 后可根据既有授权 commit。若返回 projectionNeedsSync=true，数据库已经接纳，运行 sync 修复投影；不要把同一章重新提交当作恢复方式。
+
+新 context.reviewPolicyVersion=1 要求逐项 critical_checks：世界事实、状态、资源、实体、事件、时间线、关系、人物登场及伏笔均需要 claimHash、verdict、evidenceQuote、explanation。通过 review-requirements 获取当前清单；逐字引用相同且实际判定 supported 才能接纳。unsupported/uncertain 要修正提取或保留阻塞，不能为了提交改成 supported。提取的任何改动会使相关审阅哈希失效。主观证据关键词检查只能阻止部分明显误升，不是通用语义蕴含判定。
+
+位置、生死、境界、真实身份按内置字段别名归一，不能通过 facts 并存不同当前值；改变时用 state_changes 并提供匹配的 old_value。角色认知按 holder 独立维护。context.retrieval.assessment 记录引用映射状态及已识别的当前状态/余额冲突；accepted=false 的回答不加入写作素材。审阅须填写 retrieval_check 的 assessmentHash、decision=use-formal-memory 和 notes，回到正式记忆与原文核对。自动检查覆盖常见明确句式；accepted=true 只代表来源可定位且未发现规则能识别的冲突。
+
+小说版本管理使用 `version init/save/log/bundle/restore`，完整步骤见 [版本与备份](versioning.md)。启用后接纳自动保存一致数据库副本；versionNeedsSave=true 只需补存检查点，不重复接纳。
 
 ## 修改旧章与文件恢复
 

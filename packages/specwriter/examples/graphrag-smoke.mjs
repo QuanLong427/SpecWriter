@@ -21,7 +21,7 @@ try {
   const delta = JSON.parse(readFileSync(join(root, prepared.paths.delta), 'utf8'));
   writeFileSync(join(root, prepared.paths.delta), JSON.stringify({ ...delta, ...metadata, title: '钥匙', summary: body, characters: ['林舟'], key_events: [{ description: body, evidence: { quote: body, basis: 'established' } }] }));
   const review = JSON.parse(readFileSync(join(root, prepared.paths.review), 'utf8'));
-  writeFileSync(join(root, prepared.paths.review), JSON.stringify(demoReview(review, metadata)));
+  writeFileSync(join(root, prepared.paths.review), JSON.stringify(demoReview(review, metadata, JSON.parse(readFileSync(join(root, prepared.paths.delta), 'utf8')))));
   project.commit(1, 'smoke');
   let dryRun = false;
   const runner = async (executable, args, cwd, options) => {

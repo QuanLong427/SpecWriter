@@ -20,7 +20,13 @@ function fixture(t) {
 function runner(calls, behavior = {}) {
   return async (_python, args) => {
     calls.push(args);
-    if (args[0] === '-X') return { stdout: JSON.stringify({ sources: [], unresolvedCitations: [{ citationType: 'entities', citationId: '1' }] }), stderr: '' };
+    if (args[0] === '-X') {
+      if (behavior.resolvedSources) {
+        const snapshot = args.at(-2), file = load(join(snapshot, 'manifest.json')).files[0];
+        return { stdout: JSON.stringify({ sources: [{ ...file, citationType: 'entities', citationId: '1', excerpt: readFileSync(join(snapshot, 'input', file.name), 'utf8') }], unresolvedCitations: [] }), stderr: '' };
+      }
+      return { stdout: JSON.stringify({ sources: [], unresolvedCitations: [{ citationType: 'entities', citationId: '1' }] }), stderr: '' };
+    }
     if (args[0] === '-c') return { stdout: '3.3.0', stderr: '' };
     const root = args[args.indexOf('--root') + 1];
     if (args[2] === 'init') {
@@ -52,7 +58,7 @@ async function candidate(memory, project, root, chapter, body, options = {}) {
   writeFileSync(paths.draft, body);
   const metadata = project.hashes(chapter, 'opening');
   writeFileSync(paths.delta, JSON.stringify(extraction({ ...load(paths.delta), ...metadata, title: '钥匙', summary: body, characters: ['林舟'], key_events: [{ description: body, evidence: { quote: body } }], facts: [{ subject: '林舟', predicate: '行动', object: body, scope: 'world', holder: null, evidence: { quote: body } }] }, body)));
-  writeFileSync(paths.review, JSON.stringify(assessment(load(paths.review), metadata)));
+  writeFileSync(paths.review, JSON.stringify(assessment(load(paths.review), metadata, load(paths.delta))));
   return { paths, prepared };
 }
 async function first(project, root) {
@@ -104,7 +110,8 @@ test('default preparation auto-indexes and embeds Microsoft retrieval; repeat pr
   const context = load(paths.context);
   assert.equal(context.retrieval.engine, 'microsoft-graphrag'); assert.equal(context.retrieval.status, 'ready');
   assert.equal(context.memorySelection.strategy, 'microsoft-graphrag');
-  assert.ok(context.sources.some(source => source.kind === 'retrieval' && source.content.includes('核对正文')));
+  assert.equal(context.retrieval.assessment.accepted, false);
+  assert.ok(context.sources.some(source => source.kind === 'retrieval' && source.content.includes('回答未采用')));
   assert.ok(!JSON.stringify(context).includes('private-test-placeholder'));
   assert.equal(calls.filter(args => args[2] === 'index').length, 1);
   assert.equal(calls.filter(args => args[2] === 'query').length, 1);
@@ -205,8 +212,8 @@ test('retrieval receipt tampering blocks verification without regenerating the m
 
 test('long model answers are budgeted deterministically, preserving the receipt hash and full private answer', async t => {
   const { root, project } = fixture(t); await first(project, root);
-  const answer = '带引用的检索建议。'.repeat(3000);
-  const { memory } = await configured(project, { answer });
+  const answer = '带引用的检索建议。'.repeat(3000) + '[Data: Entities (1)]';
+  const { memory } = await configured(project, { answer, resolvedSources: true });
   const { paths } = await candidate(memory, project, root, 2, '林舟保存青铜钥匙。');
   const context = load(paths.context);
   assert.equal(context.retrieval.answerTruncated, true);
@@ -215,6 +222,32 @@ test('long model answers are budgeted deterministically, preserving the receipt 
   assert.ok(source.content.length <= 6000);
   assert.equal(load(join(root, source.source)).receipt.answer, answer);
   assert.equal(project.verify(2, 'opening').valid, true);
+});
+
+test('a cited current-state conflict is excluded from writing context and requires a version-bound review', async t => {
+  const { root, project } = fixture(t);
+  const initial = await candidate(new WriterMemory(project), project, root, 1, '林舟在旧塔。');
+  const delta = load(initial.paths.delta);
+  delta.facts.push({ subject: '林舟', predicate: '位置', object: '旧塔', scope: 'world', holder: null, evidence: { quote: '林舟在旧塔。', basis: 'established' } });
+  writeFileSync(initial.paths.delta, JSON.stringify(delta));
+  writeFileSync(initial.paths.review, JSON.stringify(assessment(load(initial.paths.review), project.hashes(1, 'opening'), delta)));
+  project.commit(1, 'opening');
+  const { memory, calls } = await configured(project, { answer: '林舟在山洞。[Data: Entities (1)]', resolvedSources: true });
+  const { paths } = await candidate(memory, project, root, 2, '林舟继续守塔。');
+  const context = load(paths.context), source = context.sources.find(s => s.kind === 'retrieval');
+  assert.equal(context.retrieval.assessment.status, 'conflicting');
+  assert.equal(context.retrieval.assessment.conflicts[0].expected, '旧塔');
+  assert.ok(!source.content.includes('林舟在山洞'));
+  const review = load(paths.review);
+  review.retrieval_check.notes = ''; writeFileSync(paths.review, JSON.stringify(review));
+  assert.throws(() => project.verify(2, 'opening'), /Retrieval evidence|Invalid review/);
+  review.retrieval_check.notes = '核对第一章正文，林舟仍在旧塔；不采用山洞结论。';
+  const expectedHash = review.retrieval_check.assessmentHash;
+  review.retrieval_check.assessmentHash = '0'.repeat(64); writeFileSync(paths.review, JSON.stringify(review));
+  assert.throws(() => project.commit(2, 'opening'), /Retrieval evidence/);
+  review.retrieval_check.assessmentHash = expectedHash; writeFileSync(paths.review, JSON.stringify(review));
+  project.commit(2, 'opening');
+  assert.equal(calls.filter(args => args[2] === 'query').length, 1);
 });
 
 test('CLI uses Microsoft by default and supports explicit local configuration and query overrides', async t => {

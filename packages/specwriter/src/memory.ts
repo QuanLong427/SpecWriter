@@ -1,5 +1,6 @@
 import { hash } from './files.js';
 import { resolveEntityReference } from './entity-reference.js';
+import { stateField, stateValue } from './memory-policy.js';
 import type { MemoryFact, MemoryState, Revision, ScopedFact } from './types.js';
 
 export function trustedPrefix(revisions: Revision[]): Revision[] {
@@ -35,8 +36,9 @@ export function applyRevision(state: MemoryState, revision: Revision): void {
     else state.entities.push(updated);
   }
   const ref = (value: string) => delta.schemaVersion === 2 ? resolveEntityReference(state, value) : value;
-  const scoped = (fact: ScopedFact): ScopedFact => ({ ...fact, subject: ref(fact.subject), holder: fact.holder === null ? null : ref(fact.holder) });
-  const key = (fact: ScopedFact) => delta.schemaVersion === 2 ? factKey({ ...fact, subject: resolveEntityReference(state, fact.subject, false), predicate: fact.predicate.startsWith('relationship:') ? `relationship:${resolveEntityReference(state, fact.predicate.slice(13), false)}` : fact.predicate, holder: fact.holder === null ? null : resolveEntityReference(state, fact.holder, false) }) : factKey(fact);
+  const valueOf = (field: string, value: string) => delta.schemaVersion === 2 ? stateValue(field, value) : value;
+  const scoped = (fact: ScopedFact): ScopedFact => ({ ...fact, subject: ref(fact.subject), predicate: delta.schemaVersion === 2 ? stateField(fact.predicate, fact.object) ?? fact.predicate : fact.predicate, holder: fact.holder === null ? null : ref(fact.holder) });
+  const key = (fact: ScopedFact) => delta.schemaVersion === 2 ? factKey({ ...fact, subject: resolveEntityReference(state, fact.subject, false), predicate: stateField(fact.predicate, fact.object) ?? (fact.predicate.startsWith('relationship:') ? `relationship:${resolveEntityReference(state, fact.predicate.slice(13), false)}` : fact.predicate), holder: fact.holder === null ? null : resolveEntityReference(state, fact.holder, false) }) : factKey(fact);
   const operationKeys = new Set<string>();
   const add = (rawFact: ScopedFact, replace = false, expected?: string | null): void => {
     const fact = scoped(rawFact);
@@ -45,11 +47,14 @@ export function applyRevision(state: MemoryState, revision: Revision): void {
     const current = state.facts.filter(item => item.validUntilChapter === null && key(item) === key(fact));
     if (replace) {
       if (expected === null && current.length) throw new Error(`State already exists for ${fact.subject}.${fact.predicate}; old_value must match`);
-      if (expected !== null && (current.length !== 1 || current[0]?.object !== expected)) {
+      if (expected !== null && (current.length !== 1 || valueOf(fact.predicate, current[0]!.object) !== valueOf(fact.predicate, expected ?? ''))) {
         throw new Error(`State precondition failed for ${fact.subject}.${fact.predicate}: expected ${expected}`);
       }
       for (const item of current) item.validUntilChapter = chapter;
-    } else if (current.some(item => item.object === fact.object)) return;
+    } else {
+      if (delta.schemaVersion === 2 && stateField(fact.predicate, fact.object) && current.some(item => stateValue(fact.predicate, item.object) !== stateValue(fact.predicate, fact.object))) throw new Error(`Single-valued state conflict: ${fact.subject}.${fact.predicate}; use state_changes with matching old_value`);
+      if (current.some(item => valueOf(fact.predicate, item.object) === valueOf(fact.predicate, fact.object))) return;
+    }
     state.facts.push({
       ...fact, id: hash(JSON.stringify([revision.id, state.facts.length, fact])),
       sourceChapter: chapter, sourceRevision: revision.id, validFromChapter: chapter,
@@ -68,7 +73,7 @@ export function applyRevision(state: MemoryState, revision: Revision): void {
   }
   for (const intro of delta.cast_intros) add({ subject: intro.name, predicate: 'role', object: intro.brief_role, scope: 'world', holder: null, evidence: intro.evidence });
   for (const fact of delta.facts) {
-    if (delta.state_changes.some(change => key({ subject: change.entity, predicate: change.field, scope: change.scope, holder: change.holder, object: change.new_value, evidence: change.evidence }) === key(fact) && change.new_value !== fact.object)) {
+    if (delta.state_changes.some(change => key({ subject: change.entity, predicate: change.field, scope: change.scope, holder: change.holder, object: change.new_value, evidence: change.evidence }) === key(fact) && valueOf(change.field, change.new_value) !== valueOf(fact.predicate, fact.object))) {
       throw new Error(`Fact contradicts this chapter's state update: ${fact.subject}.${fact.predicate}`);
     }
     add(fact);

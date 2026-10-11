@@ -1,6 +1,7 @@
 import { loadConfig } from './init.js';
 import { MicrosoftGraphRag, type IndexProgress } from './microsoft-graphrag.js';
 import type { Project } from './project.js';
+import { assessRetrieval } from './memory-policy.js';
 import type { GraphRagMethod } from './types.js';
 
 /** Default memory orchestration. Canonical state remains in Project; model calls run outside its transactions. */
@@ -41,6 +42,6 @@ export class WriterMemory {
     options.signal?.throwIfAborted();
     if (this.project.corpus(corpus.atChapter).snapshotId !== corpus.snapshotId) throw new Error('Accepted chapters changed during memory retrieval; retry against the current prefix');
     const structural = this.project.query(query, { at: corpus.atChapter, limit: options.limit, expectedSnapshotId: corpus.snapshotId });
-    return { engine: 'microsoft-graphrag', ...result, structural, ...await this.maintain(result.snapshotId) };
+    return { engine: 'microsoft-graphrag', ...result, assessment: assessRetrieval(result, this.project.memory(corpus.atChapter)), structural, ...await this.maintain(result.snapshotId) };
   }
 }

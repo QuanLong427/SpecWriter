@@ -4,6 +4,7 @@ import { atomicWrite, json, readJson, safePath } from './files.js';
 
 export interface ModelUsage {
   model: string; kind: 'completion' | 'embedding' | 'unknown'; requests: number; cached: number;
+  local?: true;
   successful: number; failed: number; responsesWithTokens: number;
   inputTokens: number; outputTokens: number; retries: number;
 }
@@ -34,11 +35,12 @@ export function validatePrices(value: unknown): asserts value is Prices {
 export function usageCost(record: UsageRecord, prices?: Prices): number | null {
   if (record.coverage === 'not-called') return 0;
   if (record.coverage === 'complete' && record.models.every(m => m.requests === m.cached && !m.failed)) return 0;
-  if (!prices || record.coverage !== 'complete') return null;
+  if (record.coverage !== 'complete') return null;
   let cost = 0;
   for (const model of record.models) {
+    if (model.local) continue; // Local compute has no per-token API charge; hardware/electricity excluded.
     if (model.requests === model.cached && !model.failed) continue;
-    const rate = prices.models.find(item => item.model === model.model && item.kind === model.kind);
+    const rate = prices?.models.find(item => item.model === model.model && item.kind === model.kind);
     if (!rate) return null;
     cost += (model.inputTokens * rate.inputPerMillion + model.outputTokens * (rate.outputPerMillion ?? 0)) / 1_000_000;
   }
@@ -63,9 +65,10 @@ export function parseRequestMetrics(path: string, successfulProcess: boolean): P
         return value as number;
       };
       const kind = number('specwriter_embedding') ? 'embedding' : number('specwriter_completion') ? 'completion' : 'unknown';
-      const key = `${kind}:${item.model}`;
+      const local = number('specwriter_local') === 1 && kind === 'embedding';
+      const key = `${kind}:${item.model}:${local}`;
       let entry = models.get(key);
-      if (!entry) { entry = { model: item.model, kind, requests: 0, cached: 0, successful: 0, failed: 0, responsesWithTokens: 0, inputTokens: 0, outputTokens: 0, retries: 0 }; models.set(key, entry); }
+      if (!entry) { entry = { model: item.model, kind, ...(local ? { local: true as const } : {}), requests: 0, cached: 0, successful: 0, failed: 0, responsesWithTokens: 0, inputTokens: 0, outputTokens: 0, retries: 0 }; models.set(key, entry); }
       records++;
       entry.requests += number('attempted_request_count'); entry.successful += number('successful_response_count');
       entry.failed += number('failed_response_count');

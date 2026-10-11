@@ -4,6 +4,24 @@
 
 要求 Node.js 24+。Node 24 的 `node:sqlite` 会提示 experimental；当前实现与测试使用 Node 24.14。WriterMemory 默认使用 Microsoft GraphRAG，需要 Python >=3.11,<3.14、GraphRAG 3.3.x 和模型配置。显式 local 模式的检索不调用模型。
 
+本轮补齐重要边界：关键当前状态唯一性、声明与证据逐项审阅、检索引用状态与正式记忆冲突核对，以及每本小说独立的 Git 检查点和迁移恢复。自动核对覆盖常见明确句式，复杂语义仍由 Codex 审阅。
+
+## 小说版本、备份与恢复
+
+在小说目录启用，之后每次接纳成功自动保存检查点：
+
+```powershell
+node .specwriter/bin/specwriter.mjs version init
+node .specwriter/bin/specwriter.mjs version save --message "卷一完成"
+node .specwriter/bin/specwriter.mjs version log
+node .specwriter/bin/specwriter.mjs version bundle --out E:\backups\my-book.bundle
+node .specwriter/bin/specwriter.mjs version restore HEAD --to E:\novels\recovered
+```
+
+`restore` 也可用 `--bundle FILE` 在新机器恢复，不依赖原小说数据库。检查点保存正文、草稿、Spec、计划、审阅、批注和一致性 SQLite 副本；API Key、模型权重及 GraphRAG 索引不保存。恢复先验证再发布到新目录，并重新绑定当前安装的本地启动器；模型配置和索引需要重建。独立仓库在 `.specwriter/version/repository.git`，不会改动作者已有 Git 暂存区或推送远端。完整说明见 [版本与备份](assets/versioning.md)。本地 Git 用于回退，异地备份需要另存 bundle。
+
+`versionNeedsSave=true` 表示章节已接纳但 Git 检查点未保存，修复后运行 version save；不要重复接纳。旧小说重新运行 init 更新未修改的 Skills 和协议，再 refresh 待写章节。
+
 ## 安装与初始化
 
 仓库开发方式：
@@ -44,6 +62,8 @@ node .specwriter/bin/specwriter.mjs prepare 1 --work opening --query "林舟、�
 
 prepare 返回 intent、context、draft、delta、review 路径。Codex 完善章纲后先 `prepare 1 --work opening --refresh`，再完成正文、事实提取和审阅；`hash 1 --work opening` 提供正文、上下文和 intentHash。版本 2 契约要求证据 basis 和证据/遗漏/连续性三项有依据的审阅检查，修改章纲也会使旧候选失效。随后：
 
+新准备的上下文要求 Codex 在提取后运行 `review-requirements N --work ID`，逐项填写 critical_checks 的当前声明哈希、精确证据、判定和说明。位置、生死、境界、真实身份只能保留一个当前世界值；变更必须用 state_changes 匹配旧值。显式“以为/听说/梦见”不能仅靠 established 标签确立真相。检索 assessment 会报告缺失/未解析引用和已识别的状态/余额冲突；未通过的回答不进入续写素材，审阅需回到正式记忆和原文填写 retrieval_check。引用可定位仍不代表推断成立。
+
 ```powershell
 node .specwriter/bin/specwriter.mjs verify 1 --work opening
 node .specwriter/bin/specwriter.mjs commit 1 --work opening
@@ -68,7 +88,7 @@ CLI 默认输出 JSON；`--json` 还会将错误格式化为 JSON（写到 stder
 | `.specwriter/graphrag/` | 默认后端配置、按版本隔离的正文/向量/社区报告与查询缓存（默认忽略） |
 | `specwriter/archive/<id>/` | 工作文档快照与正文版本清单 |
 
-备份整个小说目录，特别是 `writer.db`；数据库和草稿不要放进忽略规则。数据库 WAL/SHM 是临时运行文件，退出 CLI 后再备份或提交版本控制。生成的本地启动器指向安装位置；换电脑或移动安装后重新 init，作者修改的文件会被保留并报告。
+使用 version save/bundle 保存一致的数据库副本及作者文档，不直接复制运行中的 writer.db。自动检查点需每本小说先 version init，当前只在章节接纳后触发；单独修改 Spec、计划、批注或阅读偏好后需要手工 save。生成的本地启动器指向安装位置；换电脑或移动安装后重新 init，作者修改的文件会被保留并报告。
 
 ## 记忆与修订
 
@@ -81,6 +101,8 @@ CLI 默认输出 JSON；`--json` 还会将错误格式化为 JSON（写到 stder
 ## 默认 Microsoft GraphRAG
 
 先在 Python >=3.11,<3.14 的独立虚拟环境安装 `graphrag==3.3.0`（随包 requirements-graphrag.txt 固定版本），再初始化官方配置：
+
+当前本地 embedding 方案使用 BGE-M3：先 `ollama pull bge-m3`，再通过 setup 的 `--env-file FILE --provider qwen --embedding bge-m3 --embedding-base http://127.0.0.1:11434/v1 --embedding-dimensions 1024` 读取 Qwen 并配置本地向量。详见 [本地 BGE-M3 + Qwen](assets/memory.md#本地-bge-m3--qwen)。下面是使用云端 embedding 的可选配置：
 
 ```powershell
 node .specwriter/bin/specwriter.mjs memory graphrag setup --python "E:/novels/book/.graphrag-venv/Scripts/python.exe" --model gpt-4.1 --embedding text-embedding-3-large
@@ -117,6 +139,16 @@ TypeScript 默认入口是异步 `new WriterMemory(project).prepare/query`；同
 
 ## 记忆实验与用量
 
+支持从现有 `.env` 的 `LLM_PROVIDERS` 读取 Qwen 配置，embedding 独立使用本地 Ollama BGE-M3；参见 [本地配置步骤](assets/memory.md#本地-bge-m3--qwen)。本地向量化在用量中标记 `local: true`，API 费用为零，Qwen 费用仍需提供单价。
+
+源码仓库提供可选真实连接检查（会调用配置的 Qwen API）：
+
+```powershell
+node packages/specwriter/examples/local-memory-smoke.mjs NEW_BOOK_ROOT ENV_FILE GRAPHRAG_PYTHON
+```
+
+只对一章人工短文建索引并查询，结果存于 `connection-result.json`；它验证连接，不代表长篇小说质量或成本收益。运行前需 `ollama pull bge-m3` 并启动本地服务。
+
 运行 `specwriter benchmark run` 可在独立目录比较全量建库、缓存、增量更新和结构化检索。默认离线，不调用模型；真实实验需要显式 `--mode live --provider 小说根目录 --max-operations N`。`memory usage` 报告 GraphRAG 请求用量，缺失数据保留未知，`--prices FILE` 使用用户提供的单价估算费用。详见 [实验与评分说明](assets/benchmark.md)。
 
 ## 小说阅读、批注与交付
@@ -151,7 +183,7 @@ reader:demo 生成有两章正式正文、一章草稿和示例批注的临时�
 
 可选兼容检查：`node packages/specwriter/examples/graphrag-smoke.mjs PATH/TO/PYTHON` 使用官方 GraphRAG 3.3.0 执行 init、标准/增量配置 dry-run、query/update 参数检查、原生增量文档差分/合并，以及 parquet 引用映射（含 CRLF 原文）。不执行真实模型索引/查询；完整问答需要有效供应商凭据。
 
-已有小说重新 init 安装新版 Skills 与协议；作者改过的 Skills 保留并报告冲突。未完成章节先 prepare --refresh，再按版本 2 重新提取和审阅；已接纳历史保留。图计算版本升级为 2，旧派生 Microsoft 索引需要为新快照重新建立。
+已有小说重新 init 安装新版 Skills 与协议；作者改过的 Skills 保留并报告冲突。未完成章节先 prepare --refresh，再按版本 2 重新提取和审阅；已接纳历史保留。图计算版本为 kernelVersion 3，旧派生 Microsoft 索引需要为新快照重新建立。
 
 当前是可运行 MVP：Microsoft GraphRAG 默认用于准备和查询，本地结构化记忆负责正式状态依据并提供显式离线模式；本地阅读器负责正文展示、批注与交付，没有独立写作 Agent、MCP 服务或直接修改正文的 Web 编辑器。证据校验能确认引用存在，不能机械证明语义蕴含或文学质量；这些由 Codex 审阅。故事内时间暂为文本，不自动推断复杂倒叙关系。百万字规模的质量与性能尚未基准验证。
 

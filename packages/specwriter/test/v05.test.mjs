@@ -24,7 +24,7 @@ function candidate(project, root, chapter, body, changes = {}, refresh = false) 
   writeFileSync(paths.draft, body);
   const metadata = project.hashes(chapter, 'opening');
   const delta = extraction({ ...load(paths.delta), ...metadata, title: '来信', summary: body, characters: ['林舟'], key_events: [{ description: body, evidence: { quote: body } }], ...changes }, body);
-  const review = assessment(load(paths.review), metadata);
+  const review = assessment(load(paths.review), metadata, delta);
   writeFileSync(paths.delta, JSON.stringify(delta)); writeFileSync(paths.review, JSON.stringify(review));
   return { paths, delta, review };
 }
@@ -89,7 +89,9 @@ test('reported conclusions stay beliefs; V2 assessments and exact repeated quote
   input.delta.key_events = [{ description: '回头', evidence: { quote: '林舟回头。', basis: 'established' } }]; writeFileSync(input.paths.delta, JSON.stringify(input.delta));
   assert.throws(() => project.verify(1, 'opening'), /Repeated evidence/);
   input.delta.key_events[0].evidence.start = body.lastIndexOf('林舟回头。'); input.delta.key_events[0].evidence.end = body.length;
-  writeFileSync(input.paths.delta, JSON.stringify(input.delta)); project.commit(1, 'opening');
+  writeFileSync(input.paths.delta, JSON.stringify(input.delta));
+  writeFileSync(input.paths.review, JSON.stringify(assessment(input.review, project.hashes(1, 'opening'), input.delta)));
+  project.commit(1, 'opening');
   assert.equal(project.query('师父').facts.length, 0);
   assert.ok(project.query('师父', { holder: '村民' }).facts.some(item => item.object === '已死'));
   assert.equal(project.memory().episodes[0].evidenceLine, 5);

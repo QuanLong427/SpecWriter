@@ -24,7 +24,7 @@ function draft(project, root, chapter, body, work = 'opening') {
   writeFileSync(paths.draft, body);
   const metadata = project.hashes(chapter, work);
   writeFileSync(paths.delta, JSON.stringify(extraction({ ...load(paths.delta), ...metadata, title: `废井来信 ${chapter}`, summary: '林舟收到一封信。', characters: ['林舟'], key_events: [{ description: '林舟收到信', evidence: { quote: body } }] }, body)));
-  writeFileSync(paths.review, JSON.stringify(assessment(load(paths.review), metadata)));
+  writeFileSync(paths.review, JSON.stringify(assessment(load(paths.review), metadata, load(paths.delta))));
   return paths;
 }
 function input(chapter, note = '此处让人物多一些迟疑。', quote = '', start = 0) {

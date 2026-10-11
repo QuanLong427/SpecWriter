@@ -75,7 +75,9 @@ for name, citation in citations:
         units = rows("text_units", unit_ids, "id")
     resolved = False
     for unit in units:
-        for document in rows("documents", values(unit.get("document_ids")), "id"):
+        # GraphRAG 3.3 writes one document_id per text unit. Older tables used document_ids.
+        document_ids = values(unit.get("document_id")) or values(unit.get("document_ids"))
+        for document in rows("documents", document_ids, "id"):
             filename = re.split(r"[/\\]", str(document.get("title", "")))[-1]
             # Default readers may omit .txt from the title. Resolve only exact chapter file names.
             if filename not in files and filename + ".txt" in files:

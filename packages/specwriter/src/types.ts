@@ -68,6 +68,8 @@ export interface ChapterReview {
   reviewed: boolean;
   issues: { id: string; kind: 'continuity' | 'spec' | 'craft'; severity: 'blocking' | 'warning' | 'suggestion'; description: string; resolved: boolean; resolution?: string }[];
   notes: string[];
+  critical_checks?: { claimHash: string; verdict: 'supported' | 'unsupported' | 'uncertain'; evidenceQuote: string; explanation: string }[];
+  retrieval_check?: { assessmentHash: string; decision: 'use-formal-memory'; notes: string };
 }
 export interface Revision {
   id: number;
@@ -129,6 +131,7 @@ export interface ContextSource {
 export interface ContextPackage {
   schemaVersion: 1;
   contractVersion?: 2;
+  reviewPolicyVersion?: 1;
   intentHash?: string;
   chapter: number;
   workId: string;
@@ -140,7 +143,7 @@ export interface ContextPackage {
   selectedChars: number;
   memory: MemoryState;
   memorySelection: { strategy: 'query-recent-one-hop' | 'hybrid-graphrag' | 'microsoft-graphrag'; totalActiveFacts: number; selectedFacts: number; totalHooks: number; selectedHooks: number; totalEpisodes?: number; selectedEpisodes?: number };
-  retrieval?: { engine: 'writer-memory-graphrag' | 'microsoft-graphrag'; snapshotId: string; hops: number; seedIds: string[]; paths: GraphPath[]; status?: 'empty' | 'ready'; method?: GraphRagMethod; receiptId?: string; answerHash?: string; configHash?: string; outputHash?: string; answerTruncated?: boolean };
+  retrieval?: { engine: 'writer-memory-graphrag' | 'microsoft-graphrag'; snapshotId: string; hops: number; seedIds: string[]; paths: GraphPath[]; status?: 'empty' | 'ready'; method?: GraphRagMethod; receiptId?: string; answerHash?: string; configHash?: string; outputHash?: string; answerTruncated?: boolean; assessment?: RetrievalAssessment };
   sources: ContextSource[];
   contextHash: string;
 }
@@ -157,6 +160,7 @@ export interface BookConfig {
   name: string;
   language: 'zh' | 'en';
   contextBudgetChars: number;
+  versioning?: { enabled: boolean; autoSave: boolean };
   memory?: { backend: 'microsoft-graphrag' | 'local'; method?: GraphRagMethod; autoIndex?: boolean; indexRetention?: number };
 }
 export type GraphRagMethod = 'local' | 'global' | 'drift' | 'basic';
@@ -168,6 +172,11 @@ export interface RetrievalReceipt {
   unresolvedCitations?: { citationType: string; citationId: string }[];
 }
 export interface RetrievalSource { citationType: string; citationId: string; chapter: number; revision: number; bodyHash: string; excerpt: string }
+export interface RetrievalAssessment {
+  policyVersion: 1; status: 'supported' | 'needs-review' | 'conflicting'; evidenceStatus: 'verified' | 'partial' | 'missing';
+  accepted: boolean; assessmentHash: string; warnings: string[]; analysisTruncated: boolean; checkedCharacters: number;
+  conflicts: { subject: string; field: string; expected: string; observed: string; sourceChapter: number; sourceRevision: number; quote: string; answerExcerpt: string }[];
+}
 export interface GraphNode extends Partial<Provenance> {
   id: string;
   kind: 'entity' | 'value' | 'event' | 'hook' | 'resource';
@@ -192,7 +201,7 @@ export interface GraphEdge extends Provenance {
 }
 export interface GraphSnapshot {
   schemaVersion: 1;
-  kernelVersion: 1 | 2;
+  kernelVersion: 1 | 2 | 3;
   snapshotId: string;
   atChapter: number;
   sourceRevisions: { chapter: number; revision: number; bodyHash: string; deltaHash: string }[];

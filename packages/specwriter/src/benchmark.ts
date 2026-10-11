@@ -7,7 +7,8 @@ import { initProject } from './init.js';
 import { Project } from './project.js';
 import { MicrosoftGraphRag, runGraphRag, type ProcessRunner } from './microsoft-graphrag.js';
 import { UsageLedger, type Prices } from './usage.js';
-import type { GraphRagMethod } from './types.js';
+import type { ChapterDelta, GraphRagMethod } from './types.js';
+import { criticalClaims } from './memory-policy.js';
 
 export type BenchmarkArm = 'cold' | 'warm' | 'incremental' | 'structural';
 interface FixtureChapter { chapter: number; body: string; delta: Record<string, unknown> }
@@ -63,6 +64,7 @@ function accept(project: Project, chapter: FixtureChapter) {
   const review = readJson<Record<string, unknown>>(safePath(project.root, prepared.paths.review));
   atomicWrite(safePath(project.root, prepared.paths.review), json({ ...review,
     ...Object.fromEntries(['chapter', 'contextHash', 'draftHash', 'intentHash'].map(key => [key, metadata[key as keyof typeof metadata]])), reviewed: true,
+    critical_checks: criticalClaims(data as unknown as ChapterDelta).map(item => ({ claimHash: item.claimHash, verdict: 'supported', evidenceQuote: item.evidenceQuote, explanation: `人工夹具预设：${item.claim}；不是模型语义评估。` })),
     checks: Object.fromEntries(['evidence', 'coverage', 'continuity'].map(key => [key, { checked: true, notes: ['人工编写的实验夹具；自动接纳不代表语义审阅通过。'] }])) }));
   project.verify(chapter.chapter, 'benchmark-fixture'); project.commit(chapter.chapter, 'benchmark-fixture');
 }

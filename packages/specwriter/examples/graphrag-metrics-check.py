@@ -1,5 +1,6 @@
 """Exercise the observer against real GraphRAG classes, without a model/API call."""
 import importlib.util
+import asyncio
 import json
 import runpy
 import sys
@@ -34,8 +35,28 @@ def exercise(*args, **kwargs):
                                     usage={"prompt_tokens": 50, "total_tokens": 50})
     embedding_metrics = {"attempted_request_count": 1, "successful_response_count": 1,
                          "failed_response_count": 0}
+    config.specwriter_local = True
     processor.process_metrics(model_config=config, metrics=embedding_metrics, input_args={}, response=embedding)
     MemoryMetricsStore(id="openai/specwriter-embedding").update_metrics(metrics=embedding_metrics)
+    if sys.platform == "win32":
+        from graphrag_storage.storage_config import StorageConfig
+        from graphrag_storage.storage_factory import create_storage
+        base = Path(destination).resolve().parent / "long-path-check" / ("w" * 120) / ("w" * 120)
+        storage = create_storage(StorageConfig(type="file", base_dir=str(base))).child("extract_graph")
+        async def roundtrip():
+            key = "a" * 64 + "_v4"
+            await storage.set(key, "long-path-fixture")
+            assert await storage.get(key) == "long-path-fixture"
+            await storage.delete(key)
+        asyncio.run(roundtrip())
+        from graphrag_vectors.index_schema import IndexSchema
+        from graphrag_vectors.vector_store_config import VectorStoreConfig
+        from graphrag_vectors.vector_store_factory import create_vector_store
+        vectors = create_vector_store(VectorStoreConfig(type="lancedb", db_uri=str(base / "vectors")),
+                                      IndexSchema(index_name="fixture", vector_size=2))
+        vectors.connect()
+        table = vectors.db_connection.create_table("fixture", [{"id": "local", "vector": [1.0, 0.0]}], mode="overwrite")
+        assert table.search([1.0, 0.0]).limit(1).to_list()[0]["id"] == "local"
 
 
 runpy.run_module = exercise
@@ -47,4 +68,6 @@ assert len(records) == 5, records
 assert records[1]["metrics"]["specwriter_completion"] == 1
 assert records[2]["metrics"]["cached_responses"] == 1
 assert records[3]["metrics"]["specwriter_embedding"] == 1
-print(json.dumps({"observerCompatible": True, "cachedUsageReplayExercised": True, "modelCalls": 0}))
+assert records[3]["metrics"]["specwriter_local"] == 1
+print(json.dumps({"observerCompatible": True, "cachedUsageReplayExercised": True, "localEmbeddingTagged": True,
+                  "windowsLongPathExercised": sys.platform == "win32", "modelCalls": 0}))

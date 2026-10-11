@@ -2,6 +2,7 @@ import { Ajv } from 'ajv';
 import { join } from 'node:path';
 import { readJson, schemasRoot } from './files.js';
 import type { ChapterDelta, ChapterReview } from './types.js';
+import { subjectiveOnly } from './memory-policy.js';
 
 const ajv = new Ajv({ allErrors: true, strict: true });
 const deltaValidator = ajv.compile(readJson(join(schemasRoot, 'chapter-delta.schema.json')));
@@ -9,6 +10,10 @@ const reviewValidator = ajv.compile(readJson(join(schemasRoot, 'review.schema.js
 export function validateDelta(value: unknown, body: string): asserts value is ChapterDelta {
   if (!deltaValidator(value)) throw new Error(`Invalid memory delta: ${ajv.errorsText(deltaValidator.errors)}`);
   const delta = value as ChapterDelta;
+  for (const item of [...delta.facts, ...delta.state_changes]) {
+    const claim = 'object' in item ? item.object : item.new_value;
+    if (delta.schemaVersion === 2 && item.scope === 'world' && subjectiveOnly(item.evidence.quote) && !subjectiveOnly(claim)) throw new Error('Subjective-only evidence cannot establish a world state/fact; use belief or a precise establishing passage');
+  }
   for (const collection of [delta.key_events, delta.timeline_events, delta.foreshadow_updates, delta.relationship_changes, delta.state_changes, delta.cast_intros, delta.facts, delta.entities ?? [], delta.narrative_events ?? [], delta.resource_changes ?? []]) {
     for (const item of collection) {
       if (!body.includes(item.evidence.quote)) throw new Error(`Evidence quote does not occur in draft: ${item.evidence.quote.slice(0, 80)}`);

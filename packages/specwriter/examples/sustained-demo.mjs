@@ -29,7 +29,7 @@ function accept(chapter, work, revised = false) {
     narrative_events: [{ id: `station-${chapter}`, description: `抵达${room}`, participants: [name], location: room, story_time: `旅途第${chapter}日`, causes: chapter > 1 ? [`station-${chapter - 1}`] : [], scope: 'world', holder: null, evidence }],
     foreshadow_updates: [1, 12, 24].includes(chapter) ? [{ id: 'locked-box', action: chapter === 1 ? 'plant' : chapter === 12 ? 'advance' : 'resolve', description: chapter === 1 ? '铜匣里的秘密' : null, evidence }] : [] };
   writeFileSync(paths.delta, JSON.stringify(delta));
-  writeFileSync(paths.review, JSON.stringify(demoReview(load(paths.review), metadata)));
+  writeFileSync(paths.review, JSON.stringify(demoReview(load(paths.review), metadata, delta)));
   project.verify(chapter, work); project.commit(chapter, work);
 }
 try {

@@ -24,7 +24,7 @@ function candidate(project, root, chapter, body, changes = {}, work = 'opening',
   writeFileSync(paths.draft, body);
   const metadata = project.hashes(chapter, work);
   const delta = { ...load(paths.delta), ...metadata, title: `第${chapter}章`, summary: body, characters: ['林舟'], key_events: [{ description: body, evidence: { quote: body } }], ...changes };
-  const review = assessment(load(paths.review), metadata);
+  const review = assessment(load(paths.review), metadata, extraction(delta, body));
   writeFileSync(paths.delta, JSON.stringify(extraction(delta, body), null, 2));
   Object.assign(delta, extraction(delta, body));
   writeFileSync(paths.review, JSON.stringify(review, null, 2));
@@ -173,6 +173,8 @@ test('state preconditions and chapter time history are enforced', t => {
   assert.throws(() => project.commit(2, 'opening'), /precondition/);
   input.delta.state_changes[0].old_value = '废井';
   writeFileSync(input.paths.delta, JSON.stringify(input.delta));
+  assert.throws(() => project.commit(2, 'opening'), /Critical review/);
+  writeFileSync(input.paths.review, JSON.stringify(assessment(load(input.paths.review), project.hashes(2, 'opening'), input.delta)));
   project.commit(2, 'opening');
   assert.equal(project.query('林舟', { at: 1 }).facts.find(item => item.predicate === '位置').object, '废井');
   assert.equal(project.query('林舟', { at: 2 }).facts.find(item => item.predicate === '位置').object, '山洞');

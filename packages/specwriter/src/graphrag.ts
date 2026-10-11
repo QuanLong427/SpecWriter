@@ -8,7 +8,7 @@ export function graphIdentity(revisions: Revision[], atChapter: number) {
   const prefix = trustedPrefix(revisions);
   if (!Number.isSafeInteger(atChapter) || atChapter < 0 || atChapter > prefix.length) throw new Error('Graph chapter is beyond reconciled memory');
   const sourceRevisions = prefix.slice(0, atChapter).map(item => ({ chapter: item.chapter, revision: item.id, bodyHash: item.bodyHash, deltaHash: hash(json(item.delta)) }));
-  const snapshotId = hash(json({ kernelVersion: 2, atChapter, sourceRevisions }));
+  const snapshotId = hash(json({ kernelVersion: 3, atChapter, sourceRevisions }));
   return { snapshotId, sourceRevisions };
 }
 
@@ -76,7 +76,7 @@ export function buildGraph(state: MemoryState, revisions: Revision[]): GraphSnap
     nodes.set(id, { id, kind: 'resource', recordId: json([resource.entity, resource.resource]).trim(), label: `${resource.resource}=${resource.amount}`, aliases: [resource.resource], description: '当前有正文证据的资源余额', sourceChapter: resource.sourceChapter, sourceRevision: resource.sourceRevision, evidence: resource.evidence, evidenceLine: resource.evidenceLine });
     addEdge(resolveEntity(resource.entity), id, 'owns-resource', 'resource', resource);
   }
-  return { schemaVersion: 1, kernelVersion: 2, ...identity, atChapter: state.atChapter, nodes: [...nodes.values()].sort((a, b) => a.id.localeCompare(b.id)), edges: edges.sort((a, b) => a.id.localeCompare(b.id)) };
+  return { schemaVersion: 1, kernelVersion: 3, ...identity, atChapter: state.atChapter, nodes: [...nodes.values()].sort((a, b) => a.id.localeCompare(b.id)), edges: edges.sort((a, b) => a.id.localeCompare(b.id)) };
 }
 
 export function visibleGraph(snapshot: GraphSnapshot, holder?: string): GraphSnapshot {

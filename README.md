@@ -1,5 +1,7 @@
 # SpecWriter
 
+本轮新增每本小说独立的 Git 检查点与 bundle 迁移恢复，并补齐关键状态唯一性、逐项证据审阅和 GraphRAG 回答冲突核对。使用方式见 [小说版本与备份](packages/specwriter/assets/versioning.md) 和 [CLI 文档](packages/specwriter/README.md)。
+
 SpecWriter 是面向 Codex 的长篇小说创作工作流，WriterMemory 是其长期记忆模块。通过创作约定、滚动计划、正文审阅和有证据的记忆提交，帮助 Agent 在新会话和长篇写作中恢复人物、伏笔与剧情状态。
 
 当前已经实现本地 CLI、7 个 Codex Skills、4 份创作约定模板、版本化的正文和记忆提交闭环，以及本地小说阅读器。WriterMemory 默认使用 Microsoft GraphRAG 检索，并保留带证据的结构化状态与显式离线模式。
@@ -17,6 +19,8 @@ node packages/specwriter/dist/cli.js init E:\novels\my-book --name "我的小说
 阅读写好的小说，在小说目录运行 `node .specwriter/bin/specwriter.mjs read`。浏览器提供章节目录、草稿预览、字号/行距、夜间阅读、段落批注和版本对照。按“复制给 Codex”把意见带回对话，或直接让 Codex 读取批注修订。`export --format txt|md|html` 导出正式作品；阅读和导出不调用模型。
 
 默认后端需要 Python >=3.11,<3.14、`graphrag==3.3.0` 和模型凭据。运行 `memory graphrag setup --python EXE --model MODEL --embedding MODEL` 初始化供应商配置。第一章没有历史正文，跳过索引与模型检索；从第二章起 prepare 自动索引已接纳前缀并取回语义记忆。详见下方记忆文档。离线体验可在 init 时加 `--backend local`。
+
+支持 Qwen 生成 + 本地 Ollama BGE-M3 向量化：setup 可通过 `--env-file FILE --provider qwen` 读取现有凭据，并用 `--embedding bge-m3 --embedding-base http://127.0.0.1:11434/v1 --embedding-dimensions 1024` 配置本地 embedding。完整命令及费用边界见 [本地 BGE-M3 接入](packages/specwriter/assets/memory.md#本地-bge-m3--qwen)。
 
 - [安装、命令与使用说明](packages/specwriter/README.md)
 - [架构与数据边界](docs/specwriter-architecture.md)

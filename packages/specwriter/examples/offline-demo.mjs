@@ -34,7 +34,7 @@ try {
     if (passage.changes) delta.state_changes.push({ ...passage.changes, reason: null, scope: 'world', holder: null, evidence });
     else delta.facts.push({ subject: '师父', predicate: '状态', object: '活着', scope: 'belief', holder: '林舟', evidence: { ...evidence, basis: 'inferred' } });
     save(prepared.paths.delta, delta);
-    save(prepared.paths.review, demoReview(parse(prepared.paths.review), metadata));
+    save(prepared.paths.review, demoReview(parse(prepared.paths.review), metadata, parse(prepared.paths.delta)));
     project.verify(chapter, 'opening'); project.commit(chapter, 'opening');
   }
   project.archive('opening');

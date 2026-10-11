@@ -31,7 +31,7 @@ function candidate(project, root, chapter, body, changes = {}, options = {}) {
   writeFileSync(paths.draft, body);
   const metadata = project.hashes(chapter, 'opening');
   writeFileSync(paths.delta, JSON.stringify(extraction({ ...load(paths.delta), ...metadata, title: `第${chapter}章`, summary: body, characters: ['林舟'], key_events: [{ description: body, evidence: { quote: body } }], ...changes }, body)));
-  writeFileSync(paths.review, JSON.stringify(assessment(load(paths.review), metadata)));
+  writeFileSync(paths.review, JSON.stringify(assessment(load(paths.review), metadata, load(paths.delta))));
   return paths;
 }
 function accept(project, root, chapter, body, changes = {}) {

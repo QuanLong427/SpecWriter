@@ -8,6 +8,7 @@ import { assetsRoot, atomicWrite, chapterId, hash, json, readJson, safePath, wri
 import type { Project } from './project.js';
 import type { GraphRagMethod, RetrievalReceipt, RetrievalSource } from './types.js';
 import { UsageLedger } from './usage.js';
+import { completionCredentials, isLoopbackApi, modelApiBase } from './provider-config.js';
 
 export interface ProcessResult { stdout: string; stderr: string }
 export interface ProcessOptions { signal?: AbortSignal; timeoutMs?: number; onSpawn?: (pid: number) => void; metricsPath?: string }
@@ -41,6 +42,7 @@ export const runGraphRag: ProcessRunner = (executable, args, cwd, options = {}) 
     options.signal?.removeEventListener('abort', abort);
     if (stopReason) reject(new Error(stopReason));
     else if (overflow) reject(new Error('GraphRAG output exceeded the capture limit; inspect its private logs'));
+    else if (code !== 0 && stderr.includes('LanceDB needs a shorter book path on this Windows volume')) reject(new Error('LanceDB requires a shorter novel directory on this Windows volume; use a path such as E:/novels/book'));
     else if (code !== 0) reject(new Error(`GraphRAG exited with code ${code}; inspect private workspace logs (credentials are not printed)`));
     else resolve({ stdout, stderr });
   });
@@ -104,18 +106,57 @@ export class MicrosoftGraphRag {
     }
     try { return await action(); } finally { rmSync(lock, { force: true }); }
   }
-  async setup(options: { python: string; model: string; embedding: string }) {
+  async setup(options: { python: string; model?: string; embedding: string; envFile?: string; provider?: string;
+    embeddingBase?: string; embeddingDimensions?: number; reconfigure?: boolean }) {
+    if (!options.embedding?.trim()) throw new Error('--embedding is required');
+    if (options.provider && !options.envFile) throw new Error('--provider requires --env-file');
+    const credentials = options.envFile ? completionCredentials(resolve(options.envFile), options.provider, options.model) : undefined;
+    const model = credentials?.model ?? options.model;
+    if (!model) throw new Error('--model or --env-file with a unique model is required');
+    const embeddingBase = options.embeddingBase ? modelApiBase(options.embeddingBase) : undefined;
+    if (embeddingBase && !isLoopbackApi(embeddingBase)) throw new Error('--embedding-base currently supports a local loopback service');
+    if (embeddingBase && options.embeddingDimensions === undefined) throw new Error('--embedding-dimensions is required with --embedding-base');
+    if (options.embeddingDimensions !== undefined && (!Number.isSafeInteger(options.embeddingDimensions) || options.embeddingDimensions < 1)) throw new Error('--embedding-dimensions must be a positive integer');
     const python = /[\\/]/.test(options.python) ? resolve(this.project.root, options.python) : options.python;
     const version = await this.checkVersion(python);
     writeNew(this.path('.gitignore'), '*\n!.gitignore\n');
     const root = this.path('provider');
     return this.locked(root, async () => {
-      if (!existsSync(safePath(root, 'settings.yaml'))) {
-        await this.run(python, ['-m', 'graphrag', 'init', '--root', root, '--model', options.model, '--embedding', options.embedding], root);
+      const existing = existsSync(safePath(root, 'settings.yaml'));
+      if (existing && !options.reconfigure && (credentials || embeddingBase || options.embeddingDimensions !== undefined)) throw new Error('Provider settings already exist; use --reconfigure to apply explicit model settings');
+      if (!existing) {
+        await this.run(python, ['-m', 'graphrag', 'init', '--root', root, '--model', model, '--embedding', options.embedding], root);
       }
       if (!existsSync(safePath(root, 'settings.yaml'))) throw new Error('GraphRAG init did not produce settings.yaml');
+      if (!existing || options.reconfigure) {
+        const settings = parse(readFileSync(safePath(root, 'settings.yaml'), 'utf8'));
+        if (credentials) {
+          settings.completion_models.default_completion_model = { model_provider: 'openai', model,
+            auth_method: 'api_key', api_key: '${GRAPHRAG_API_KEY}', api_base: credentials.apiBase,
+            call_args: { max_tokens: 4096 }, retry: { type: 'exponential_backoff', max_retries: 2 } };
+          // Keep the source .env intact; only the selected credential enters this private book.
+          const envPath = safePath(root, '.env');
+          const previousEnv = existsSync(envPath) ? readFileSync(envPath, 'utf8') : '';
+          const keyLine = `GRAPHRAG_API_KEY=${JSON.stringify(credentials.apiKey)}\n`;
+          const pattern = /^\s*(?:export\s+)?GRAPHRAG_API_KEY\s*=.*(?:\r?\n|$)/m;
+          atomicWrite(envPath, pattern.test(previousEnv) ? previousEnv.replace(pattern, () => keyLine) : `${previousEnv}\n${keyLine}`);
+        }
+        else if (options.reconfigure && options.model) settings.completion_models.default_completion_model.model = model;
+        if (options.reconfigure) settings.embedding_models.default_embedding_model.model = options.embedding;
+        if (embeddingBase) settings.embedding_models.default_embedding_model = {
+          model_provider: 'openai', model: options.embedding, auth_method: 'api_key', api_key: 'local-embedding', api_base: embeddingBase,
+          specwriter_local: true, call_args: { encoding_format: 'float' }, retry: { type: 'exponential_backoff', max_retries: 2 }
+        };
+        if (options.embeddingDimensions !== undefined) {
+          settings.vector_store = { ...settings.vector_store, vector_size: options.embeddingDimensions,
+            index_schema: Object.fromEntries(['text_unit_text', 'entity_description', 'community_full_content']
+              .map(name => [name, { index_name: name, ...(settings.vector_store?.index_schema?.[name] ?? {}), vector_size: options.embeddingDimensions }])) };
+        }
+        atomicWrite(safePath(root, 'settings.yaml'), stringify(settings));
+      }
       atomicWrite(this.path('provider.json'), json({ schemaVersion: 1, python, version }));
-      return { provider: 'microsoft-graphrag', version, directory: root, settings: safePath(root, 'settings.yaml'), credentials: safePath(root, '.env'), note: 'Configure model credentials in this private .env; setup does not call an LLM. Existing settings are preserved.' };
+      return { provider: 'microsoft-graphrag', version, directory: root, settings: safePath(root, 'settings.yaml'), credentials: safePath(root, '.env'),
+        note: 'Setup does not call models. Existing settings are preserved unless --reconfigure is explicit. Rebuild existing indexes after configuration changes.' };
     });
   }
   export(at?: number) {
@@ -176,6 +217,10 @@ export class MicrosoftGraphRag {
     settings.update_output_storage = { type: 'file', base_dir: 'update_output' };
     settings.cache = { type: 'json', storage: { type: 'file', base_dir: 'cache' } };
     const previousVector = settings.vector_store as Record<string, unknown> | undefined;
+    const schemas = previousVector?.index_schema as Record<string, Record<string, unknown>> | undefined;
+    const indexNames = ['text_unit_text', 'entity_description', 'community_full_content'].map(name =>
+      schemas?.[name] ? schemas[name].index_name ?? 'vector_index' : name);
+    if (new Set(indexNames).size !== indexNames.length) throw new Error('GraphRAG vector schemas require distinct index_name values; otherwise embedding tables overwrite each other');
     settings.vector_store = { type: 'lancedb', db_uri: 'output/lancedb',
       ...(previousVector?.vector_size !== undefined ? { vector_size: previousVector.vector_size } : {}),
       ...(previousVector?.index_schema !== undefined ? { index_schema: previousVector.index_schema } : {}) };
@@ -185,7 +230,10 @@ export class MicrosoftGraphRag {
     // No metrics writer paths can escape a snapshot or disclose prompts/credentials.
     for (const group of ['completion_models', 'embedding_models']) {
       const models = settings[group] as Record<string, Record<string, unknown>> | undefined;
-      if (models) for (const model of Object.values(models)) model.metrics = { type: 'default', store: 'memory', writer: null };
+      if (models) for (const model of Object.values(models)) {
+        if (model.specwriter_local && (group !== 'embedding_models' || typeof model.api_base !== 'string' || !isLoopbackApi(model.api_base))) throw new Error('Local embedding usage requires a loopback API endpoint');
+        model.metrics = { type: 'default', store: 'memory', writer: null };
+      }
     }
     // Custom workflows could read external corpora or skip outputs; use the standard pipeline.
     delete settings.workflows;

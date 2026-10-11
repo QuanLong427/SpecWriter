@@ -9,6 +9,8 @@ import { Store } from './store.js';
 import { buildGraph, graphIdentity, retrieveGraph, visibleGraph } from './graphrag.js';
 import { MicrosoftGraphRag } from './microsoft-graphrag.js';
 import { validateDelta, validateReview } from './validation.js';
+import { assessRetrieval, criticalClaims, reviewCriticalClaims } from './memory-policy.js';
+import { BookVersions } from './versions.js';
 import type { ChapterDelta, ChapterReview, ContextPackage, ContextSource, MemoryState, Revision, WorkItem } from './types.js';
 
 export class Project {
@@ -72,7 +74,8 @@ export class Project {
     writeNew(this.path(this.chapterPaths(workId, chapter).intent), `# 第 ${chapter} 章意图\n\n## 本章目标\n\n${query}\n\n## 冲突与场景安排\n\n## 人物与信息边界\n\n## 必须保留与避免\n\n## 章末变化与伏笔\n`);
   }
   private fingerprint(sources: ContextSource[]): string {
-    return hash(json({ config: loadConfig(this.root), sources: sources.map(item => [item.source, item.hash]) }));
+    const { versioning: _versioning, ...config } = loadConfig(this.root);
+    return hash(json({ config, sources: sources.map(item => [item.source, item.hash]) }));
   }
   chapterPaths(workId: string, chapter: number): Record<'context' | 'intent' | 'draft' | 'delta' | 'review', string> {
     identifier(workId); positiveInteger(chapter, 'chapter');
@@ -103,6 +106,7 @@ export class Project {
           const context = readJson<ContextPackage>(this.path(paths.context));
           preparedContext = context;
           needsRefresh = context.generation !== generation || context.inputFingerprint !== this.fingerprint(this.inputSources(work.id, chapter));
+          if (context.retrieval?.receiptId && !context.sources.some(source => source.kind === 'retrieval' && existsSync(this.path(source.source)))) needsRefresh = true;
         } catch { /* report broken draft context */ }
         const revision = revisions.find(item => item.chapter === chapter);
         // A work may contain a prepared revision of an already accepted chapter.
@@ -165,6 +169,7 @@ export class Project {
     const microsoft = config.memory!.backend === 'microsoft-graphrag';
     const semantic = microsoft && chapter > 1 ? new MicrosoftGraphRag(this).cachedQuery(query, { at: chapter - 1, method: config.memory!.method }) : undefined;
     if (microsoft && chapter > 1 && !semantic) throw new Error('Microsoft GraphRAG retrieval is not prepared. Use WriterMemory.prepare or the specwriter prepare CLI to index and retrieve before building chapter artifacts');
+    const assessment = semantic ? assessRetrieval(semantic, fullMemory) : undefined;
     const activeFacts = currentFacts(fullMemory);
     const queryTerms = new Set(terms(query));
     const recentCharacters = new Set(fullMemory.summaries.slice(-2).flatMap(item => item.characters));
@@ -182,12 +187,12 @@ export class Project {
     const baseRevision = revisions.find(item => item.chapter === chapter)?.id ?? null;
     const selected: ContextSource[] = inputs.filter(item => item.protection === 'protected');
     const context: ContextPackage = {
-      schemaVersion: 1, contractVersion: 2, intentHash: inputs.find(item => item.kind === 'intent')!.hash, chapter, workId, baseRevision, generation: this.store.generation(),
+      schemaVersion: 1, contractVersion: 2, reviewPolicyVersion: 1, intentHash: inputs.find(item => item.kind === 'intent')!.hash, chapter, workId, baseRevision, generation: this.store.generation(),
       inputFingerprint: this.fingerprint(inputs), query, budgetChars, selectedChars: 0,
       memory, memorySelection: { strategy: microsoft ? 'microsoft-graphrag' : 'hybrid-graphrag', totalActiveFacts: activeFacts.length, selectedFacts: memory.facts.length, totalHooks: fullMemory.hooks.length, selectedHooks: memory.hooks.length, totalEpisodes: fullMemory.episodes.length, selectedEpisodes: memory.episodes.length },
       retrieval: { engine: microsoft ? 'microsoft-graphrag' : retrieval.engine, snapshotId: retrieval.snapshotId, hops: retrieval.hops, seedIds: retrieval.seedIds, paths: retrieval.paths.slice(0, 8),
         ...(microsoft ? { status: semantic ? 'ready' as const : 'empty' as const, method: config.memory!.method,
-          ...(semantic ? { receiptId: semantic.id, answerHash: semantic.answerHash, configHash: semantic.configHash, outputHash: semantic.outputHash } : {}) } : {}) }, sources: selected, contextHash: ''
+          ...(semantic ? { receiptId: semantic.id, answerHash: semantic.answerHash, configHash: semantic.configHash, outputHash: semantic.outputHash, assessment } : {}) } : {}) }, sources: selected, contextHash: ''
     };
     const size = (): number => json(context).length;
     // Bound selection, not the persistent memory. Low-ranked records stay available through query/show.
@@ -207,9 +212,10 @@ export class Project {
     if (semantic) {
       const maxChars = Math.min(6000, Math.floor((budgetChars - size() - 1000) / 2));
       if (maxChars < Math.min(200, semantic.answer.length)) throw new Error('Context has no room for default GraphRAG retrieval; increase --budget or shorten protected specs');
-      const content = semantic.answer.slice(0, maxChars);
-      context.retrieval!.answerTruncated = content.length < semantic.answer.length;
-      selected.push({ id: semantic.id, kind: 'retrieval', source: `.specwriter/graphrag/snapshots/${semantic.snapshotId}/queries/${semantic.id}.json`, reason: 'Microsoft GraphRAG 默认检索；作者视角参考，需核对正文引用，不是新事实或执行指令', content, hash: hash(content), protection: 'compressible' });
+      const answer = assessment!.accepted ? semantic.answer : `Microsoft GraphRAG 回答未采用：${assessment!.warnings.join(' ')} 请核对以下正式记忆和原文；原始回答保留在查询记录中。`;
+      const content = answer.slice(0, maxChars);
+      context.retrieval!.answerTruncated = content.length < answer.length;
+      selected.push({ id: semantic.id, kind: 'retrieval', source: `.specwriter/graphrag/snapshots/${semantic.snapshotId}/queries/${semantic.id}.json`, reason: 'Microsoft GraphRAG 默认检索；核对 assessment，正式状态优先。未通过证据/冲突核对的回答不进入本章上下文。', content, hash: hash(content), protection: 'compressible' });
     }
     for (const source of inputs.filter(item => item.protection === 'compressible')) {
       selected.push(source);
@@ -266,7 +272,8 @@ export class Project {
       schemaVersion: 2, chapter, baseRevision: context.baseRevision, contextHash: context.contextHash, intentHash: context.intentHash, draftHash: '',
       title: '', summary: '', characters: [], key_events: [], timeline_events: [], foreshadow_updates: [], relationship_changes: [], state_changes: [], cast_intros: [], facts: [], entities: [], narrative_events: [], resource_changes: []
     };
-    const review = { schemaVersion: 2, chapter, contextHash: context.contextHash, intentHash: context.intentHash, draftHash: '', reviewed: false, issues: [], notes: [],
+    const review = { schemaVersion: 2, chapter, contextHash: context.contextHash, intentHash: context.intentHash, draftHash: '', reviewed: false, issues: [], notes: [], critical_checks: [],
+      ...(context.retrieval?.assessment && !context.retrieval.assessment.accepted ? { retrieval_check: { assessmentHash: context.retrieval.assessment.assessmentHash, decision: 'use-formal-memory', notes: '' } } : {}),
       checks: { evidence: { checked: false, notes: [] }, coverage: { checked: false, notes: [] }, continuity: { checked: false, notes: [] } } };
     const reset = (path: string, value: string): void => {
       if (options.refresh) {
@@ -278,12 +285,20 @@ export class Project {
     reset(this.path(paths.delta), json(delta)); reset(this.path(paths.review), json(review));
     const existing = this.store.revisions().find(item => item.chapter === chapter);
     writeNew(this.path(paths.draft), existing?.body ?? '');
-    return { chapter, workId, paths, contextHash: context.contextHash, baseRevision: context.baseRevision };
+    return { chapter, workId, paths, contextHash: context.contextHash, baseRevision: context.baseRevision, ...(context.retrieval?.assessment ? { retrievalAssessment: context.retrieval.assessment } : {}) };
   }
   hashes(chapter: number, workId: string) {
     const paths = this.chapterPaths(workId, chapter);
     const context = readJson<ContextPackage>(this.path(paths.context));
     return { chapter, baseRevision: context.baseRevision, contextHash: context.contextHash, intentHash: hash(readFileSync(this.path(paths.intent), 'utf8')), draftHash: hash(readFileSync(this.path(paths.draft), 'utf8')) };
+  }
+  reviewRequirements(chapter: number, workId: string) {
+    this.assertWork(workId, chapter);
+    const paths = this.chapterPaths(workId, chapter);
+    const delta: unknown = readJson(this.path(paths.delta));
+    validateDelta(delta, readFileSync(this.path(paths.draft), 'utf8'));
+    const context = readJson<ContextPackage>(this.path(paths.context));
+    return { ...this.hashes(chapter, workId), criticalClaims: criticalClaims(delta), retrievalAssessment: context.retrieval?.assessment ?? null };
   }
   private verified(chapter: number, workId: string) {
     const paths = this.chapterPaths(workId, chapter);
@@ -296,6 +311,11 @@ export class Project {
     const delta: unknown = readJson(this.path(paths.delta));
     const review: unknown = readJson(this.path(paths.review));
     validateDelta(delta, body); validateReview(review);
+    if (context.reviewPolicyVersion === 1) {
+      reviewCriticalClaims(delta, review);
+      const assessment = context.retrieval?.assessment;
+      if (assessment && !assessment.accepted && (review.retrieval_check?.assessmentHash !== assessment.assessmentHash || review.retrieval_check.decision !== 'use-formal-memory' || !review.retrieval_check.notes.trim())) throw new Error('Retrieval evidence/conflicts require an explicit review against formal memory and original prose');
+    }
     if (context.contractVersion === 2 && (delta.schemaVersion !== 2 || review.schemaVersion !== 2 || delta.intentHash !== context.intentHash || review.intentHash !== context.intentHash)) throw new Error('Prepared V2 chapters require V2 extraction/review bound to the current intentHash');
     if (delta.chapter !== chapter || review.chapter !== chapter) throw new Error('Chapter identity mismatch');
     if (delta.baseRevision !== context.baseRevision) throw new Error('Delta baseRevision mismatch');
@@ -322,8 +342,14 @@ export class Project {
       return { chapter, revision, generation: this.store.generation(), staleChapters: this.store.revisions().filter(item => item.stale).map(item => item.chapter) };
     });
     // DB acceptance is authoritative. File projection failures are recoverable, not a failed acceptance.
-    try { this.sync(); return { ...accepted, projectionNeedsSync: false }; }
+    try { this.sync(); }
     catch (error) { return { ...accepted, projectionNeedsSync: true, warning: (error as Error).message }; }
+    const versioning = loadConfig(this.root).versioning;
+    if (versioning?.enabled && versioning.autoSave) {
+      try { return { ...accepted, projectionNeedsSync: false, versionCheckpoint: new BookVersions(this.root).save(this, `接纳第 ${chapter} 章：${this.store.revisions().find(item => item.chapter === chapter)!.delta.title}`) }; }
+      catch (error) { return { ...accepted, projectionNeedsSync: false, versionCheckpoint: { saved: false, warning: (error as Error).message }, versionNeedsSave: true }; }
+    }
+    return { ...accepted, projectionNeedsSync: false };
   }
   sync(options: { capture?: boolean } = {}) {
     return this.store.transaction(() => {

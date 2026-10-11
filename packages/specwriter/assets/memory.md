@@ -80,6 +80,24 @@ node .specwriter/bin/specwriter.mjs memory graphrag setup --python "E:/novels/bo
 
 setup 调用官方 init，返回 provider/settings.yaml 和 provider/.env 路径，不调用模型。根据模型供应商填写该 .env 和 settings.yaml。重复 setup 保留已有设置；更换模型请编辑返回的配置文件。index/query 会调用配置的 API，因此按实际模型产生费用。
 
+### 本地 BGE-M3 + Qwen
+
+使用已安装的 Ollama 运行 BGE-M3 稠密向量模型，Qwen 单独负责图谱提取、摘要与回答。先执行 `ollama pull bge-m3`，确认本地 Ollama 服务可访问，再配置小说：
+
+```powershell
+specwriter memory graphrag setup --python "E:/projects/MyProjs/SpecWriter/.graphrag-venv/Scripts/python.exe" --env-file "E:/projects/MyProjs/SpecWriter/.env" --provider qwen --embedding bge-m3 --embedding-base http://127.0.0.1:11434/v1 --embedding-dimensions 1024
+```
+
+`--env-file` 支持 `LLM_PROVIDERS` JSON，其中供应商需要 `protocol: openai_chat_completions`、`api_url`、`api_key`、`models`；只有一个不同模型时自动选择，否则显式加 `--model`。也支持 `QWEN_API_KEY`、`QWEN_BASE_URL`、`QWEN_MODEL`。密钥只写入该小说私有 provider/.env，不修改来源文件，不打印密钥；本地 embedding 使用独立占位密钥。setup 不验证服务或调用模型，index/query 才会实际调用。
+
+本地服务参数必须指向回环地址，并显式给出维度；BGE-M3 设置为 1024，覆盖三个向量索引的维度，避免沿用 GraphRAG 的 3072 默认值。正文、实体、社区摘要使用独立 index_name，防止覆盖；重复表名会在索引调用前拒绝。已有配置需要加 `--reconfigure` 才会覆盖，再用 `memory graphrag index --at N --rebuild` 重建旧索引。该配置先使用稠密检索，不自动启用 BGE 的稀疏检索、多向量或 reranker。
+
+BGE-M3 模型的最大输入为 8192 token，但 Ollama 实际上下文长度还受服务/模型参数限制；可用 `ollama ps` 查看已加载长度，不要把模型上限当作部署参数。长篇小说仍须分块索引。Windows 启动器为文件存储使用长路径，为 LanceDB 使用同一目录的 Windows 短路径名，所有文件仍位于对应快照；卷不支持短路径且位置过长时，在模型调用前提示改用较短小说目录。
+
+`memory usage` 中本地 embedding 会标记 `local: true`，其 token 数反映本地工作量，API 费用为零；不包括硬件、电费。Qwen 未提供价格时仍显示未知费用。本地 embedding 不会把图谱生成变为离线步骤。固定 Ollama 模型版本，并在替换模型权重后重建索引；模型名相同不代表向量空间相同。
+
+当前实际连接检查中，索引用量可以完整记录；GraphRAG 查询内部的流式生成未返回完整 Qwen usage，查询标记 partial，不能将缺失的 tokens 当成零，也不能据此计算完整总费用。
+
 新项目配置，以及没有 memory 字段的旧项目，默认按以下设置运行：
 
 ```yaml
@@ -144,4 +162,10 @@ TypeScript 集成使用 `new WriterMemory(project).prepare/query`，两者为异
 - [InkOS](https://github.com/Narcooo/inkos)：参考正文证据驱动的状态投影、资源核算、认知边界和伏笔状态设计；未复制 AGPL 源码、schema 或提示词。
 - [Microsoft GraphRAG CLI](https://microsoft.github.io/graphrag/cli/) 与 [3.3.0 Python 包](https://pypi.org/project/graphrag/3.3.0/)：通过进程 API 集成，作为默认后端的独立 Python 依赖安装。
 
-新 delta/review 使用 schemaVersion 2，绑定 intentHash，要求证据 basis 与证据/遗漏/连续性审阅检查；重复引用需 UTF-16 字符偏移，完整规则见 [项目协议](protocol.md)。已接纳的版本 1 继续重放，不改写历史；SQLite 数据库版本仍为 2。图计算版本升级为 kernelVersion 2，旧派生索引不用于新上下文，需重新建立。复杂倒叙的故事时间推理、自动人物消歧、语义蕴含校验以及百万字性能基准仍待完善。
+新 delta/review 使用 schemaVersion 2，绑定 intentHash，要求证据 basis 与证据/遗漏/连续性审阅检查；重复引用需 UTF-16 字符偏移。新 context.reviewPolicyVersion=1 要求重要世界声明逐项审阅 critical_checks；获取当前清单使用 review-requirements。位置/location/当前位置/所在地、生死/life/alive/存活状态、境界/realm/修炼境界、真实身份/identity/真正身份归一为单值状态，不能添加不同当前值；改变需要匹配 old_value。状态字段的 alive/dead/活着/死亡值兼容归一，其他状态名不会自动猜测。
+
+默认编排器对回答做来源与当前正式状态核对，返回 assessment。missing/partial 引用或已识别冲突时不采用回答，context 保留核对提示和正式证据；审阅在 retrieval_check 中绑定 assessmentHash 并记录核对结论。已识别冲突带正式原文、章节和 revision，覆盖常见生死/位置/境界/身份/数值资源句式。accepted=true 只说明来源可定位且没有发现这些规则能识别的冲突，不证明结论蕴含、完整性或角色知情。原始回答仍保留在私有 receipt 供追溯。
+
+自动核对最多读取 60000 字符，assessment.checkedCharacters 和 analysisTruncated 记录范围；超限回答标为 needs-review 并排除，不能把未检查的剩余内容当成已通过。此上限不同于写作 context 的字符预算。
+
+已接纳版本 1 继续重放，不改写历史；SQLite 数据库版本仍为 2。图计算升级为 kernelVersion 3，旧派生缓存不用于新上下文，Microsoft 快照需要重新建立。历史版本 2 若已有互相矛盾的关键当前值，会明确报错，需要作者核对后按旧章返修流程修复，不能自动猜测真值。复杂倒叙、自动人物消歧、通用语义蕴含校验和百万字性能基准仍待完善。备份、恢复和迁移见 [版本管理](versioning.md)。

@@ -91,7 +91,7 @@ export class Store {
     if (!row || hash(row.content) !== row.checksum) return undefined;
     try {
       const graph = JSON.parse(row.content) as GraphSnapshot;
-      return graph.schemaVersion === 1 && graph.kernelVersion === 2 && graph.snapshotId === snapshotId ? graph : undefined;
+      return graph.schemaVersion === 1 && graph.kernelVersion === 3 && graph.snapshotId === snapshotId ? graph : undefined;
     } catch { return undefined; }
   }
   cacheGraph(graph: GraphSnapshot): void {

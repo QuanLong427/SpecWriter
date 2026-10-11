@@ -22,7 +22,7 @@ for (let index = 0; index < bodies.length; index++) {
   writeFileSync(paths.draft, bodies[index]);
   const metadata = project.hashes(chapter, 'opening');
   writeFileSync(paths.delta, JSON.stringify({ ...load(paths.delta), ...metadata, title: ['井底的信', '雨后的脚步', '第三封信'][index], summary: ['林舟在废井边收到来历不明的信。', '白衡带来一双鞋，要求林舟先作决定。', '林舟接过鞋，找到通向河流的路线。'][index], characters: ['林舟'], key_events: [{ description: ['林舟收到信', '白衡带来鞋', '林舟发现路线'][index], evidence: { quote: bodies[index], basis: 'established' } }] }));
-  writeFileSync(paths.review, JSON.stringify(demoReview(load(paths.review), metadata)));
+  writeFileSync(paths.review, JSON.stringify(demoReview(load(paths.review), metadata, load(paths.delta))));
   if (chapter < 3) project.commit(chapter, 'opening');
 }
 const reader = new NovelReader(project);

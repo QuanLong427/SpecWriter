@@ -63,4 +63,12 @@ citations = json.loads(result.stdout)
 assert len(citations["sources"]) == 4
 assert all(item["chapter"] == 1 and item["revision"] == 7 and item["excerpt"] == body for item in citations["sources"])
 assert {item["citationId"] for item in citations["unresolvedCitations"]} == {"99", "999"}
-print(json.dumps({"incrementalDeltaCompatible": True, "citationParquetCompatible": True, "crlfHashPreserved": True, "modelCalls": 0}))
+# Current 3.3 artifacts use a scalar document_id, rather than the legacy array.
+current_units = [{**row, "document_id": row["document_ids"][0]} for row in frames["text_units"]]
+for row in current_units:
+    del row["document_ids"]
+pd.DataFrame(current_units).to_parquet(root / "output/text_units.parquet")
+current = subprocess.run([sys.executable, "-X", "utf8", str(resolver), str(root), str(answer)], capture_output=True, text=True, encoding="utf-8", check=True)
+assert json.loads(current.stdout) == citations
+print(json.dumps({"incrementalDeltaCompatible": True, "citationParquetCompatible": True,
+                  "scalarDocumentIdCompatible": True, "crlfHashPreserved": True, "modelCalls": 0}))
