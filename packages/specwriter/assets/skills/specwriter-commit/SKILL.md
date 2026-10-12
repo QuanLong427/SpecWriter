@@ -10,3 +10,7 @@ description: 接纳 SpecWriter 小说正文版本，通过校验将正式正文�
 新上下文还要求 critical_checks 与当前提取逐项绑定；未采用的检索回答需要 retrieval_check 说明核对依据。按 [版本与备份](references/versioning.md) 使用每本小说独立 Git 检查点。启用后接纳会自动保存；versionNeedsSave=true 表示正文已接纳但检查点失败，修复原因后 version save，不能重复接纳。用户要求恢复时保留原书，校验后恢复到新目录。
 
 结构化工作流接纳前读取 work show。已有作者接纳或自动接纳指令时记录 work authorize 的实际范围与 auto，再 verify/commit，无需重复确认。draft、暂停、超范围不能接纳；改变正文或章纲后重新提取审阅。采用新约定会使未完成上下文过期。见 [创作流程](references/workflow.md)。
+
+接纳前检查适用指示、采纳批注和反馈门禁，逐项审阅绑定当前资料。接纳后绑定 applied revision；只反馈落实记录失败时正文已接纳，按阅读协议 reconcile 补记，不重复 commit。草稿不标正式落实。
+
+本章含 intent.references 时核对选中报告、来源与当前 context 绑定；变化后 refresh 并实际重审，不只替换哈希。研究和 craft 的保存不等于作者采用，接纳只将本书正文实际确立的内容按证据协议入库；外部资料不会进入默认 GraphRAG。详见 [研究协议](references/research.md)。

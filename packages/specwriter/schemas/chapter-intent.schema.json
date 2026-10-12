@@ -14,7 +14,15 @@
     "requiredEvents": { "$ref": "#/$defs/ids" }, "requiredHooks": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/text" } },
     "knowledgeChecks": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["holder", "topic"], "properties": { "holder": { "$ref": "#/$defs/id" }, "topic": { "$ref": "#/$defs/text" } } } },
     "withhold": { "$ref": "#/$defs/texts" }, "expectedChanges": { "$ref": "#/$defs/texts" },
-    "targetChars": { "type": ["integer", "null"], "minimum": 1 }, "planPaths": { "$ref": "#/$defs/texts" }
+    "targetChars": { "type": ["integer", "null"], "minimum": 1 }, "planPaths": { "$ref": "#/$defs/texts" },
+    "references": {
+      "type": "array", "maxItems": 8,
+      "items": { "type": "object", "additionalProperties": false, "required": ["id", "purpose"],
+        "properties": { "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+          "purpose": { "type": "string", "minLength": 1, "maxLength": 1000, "pattern": "\\S" },
+          "revision": { "type": "string", "pattern": "^[a-f0-9]{64}$" } }
+      }
+    }
   },
   "$defs": {
     "text": { "type": "string", "minLength": 1, "pattern": "\\S" },

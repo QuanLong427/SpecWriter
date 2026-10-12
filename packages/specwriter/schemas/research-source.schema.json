@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Immutable book-scoped external research source",
+  "type": "object", "additionalProperties": false,
+  "required": ["schemaVersion", "reportId", "bookId", "sourceId", "title", "kind", "content", "url", "publishedAt", "observedAt", "metadata", "hash", "checksum"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "reportId": { "$ref": "#/$defs/id" }, "bookId": { "type": ["string", "null"], "maxLength": 36 }, "sourceId": { "$ref": "#/$defs/id" },
+    "title": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S" },
+    "kind": { "enum": ["web", "ranking", "file", "author", "builtin"] },
+    "content": { "type": "string", "minLength": 1, "maxLength": 250000, "pattern": "\\S" },
+    "url": { "type": ["string", "null"], "maxLength": 2000 },
+    "publishedAt": { "type": ["string", "null"], "maxLength": 40 },
+    "observedAt": { "type": "string", "minLength": 1, "maxLength": 40 },
+    "metadata": { "type": "object", "maxProperties": 20, "propertyNames": { "minLength": 1, "maxLength": 64 }, "additionalProperties": { "anyOf": [{ "type": "string", "maxLength": 1000 }, { "type": "number" }, { "type": "boolean" }, { "type": "null" }] } },
+    "hash": { "$ref": "#/$defs/hash" }, "checksum": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": { "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" }, "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" } }
+}

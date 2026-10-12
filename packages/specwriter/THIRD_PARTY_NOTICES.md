@@ -15,8 +15,13 @@ No project NOTICE file was present at the referenced revision. The upstream lice
 ## Design references with no code copied
 
 - InkOS: https://github.com/Narcooo/inkos, revision `8fc2ae57080b9821257dee3e37cc677e2b6f389a`. Its author intent / context / evidence-based state projection workflow informed the design. No AGPL-3.0 source, schemas or prompt text is incorporated.
+- InkOS market research, story analysis and public-ranking workflows also informed v0.10's separation of captured evidence, interpretations and author-selected writing methods. The research library, collectors, Skills and genre profiles in this package are independently authored; no upstream Skill prose, prompts or implementation is copied.
 - OpenSpec: https://github.com/Fission-AI/OpenSpec. Workflow concepts and Codex skill delivery informed the integration; no runtime dependency or copied implementation.
 - Local Poirot project: memory retrieval / management separation informed the module boundary. No source code was copied.
 - Microsoft GraphRAG: https://github.com/microsoft/graphrag and https://microsoft.github.io/graphrag/cli/. The default retrieval backend invokes the documented GraphRAG 3.3.x CLI in a separately installed Python environment. requirements-graphrag.txt pins version 3.3.0. No upstream code or prompts are bundled; generated prompts remain in the user's private provider workspace.
 
 Runtime npm dependencies and their licenses are distributed through npm: Ajv (MIT) and YAML (ISC). Node's built-in SQLite API is used rather than bundling a separate database server.
+
+## Runtime public data sources
+
+The optional `research radar` command reads Fanqie's public ranking endpoint (`https://api-lf.fanqiesdk.com/api/novel/channel/homepage/rank/rank_list/v2/`) and Qidian's public ranking page (`https://www.qidian.com/rank/`). Retrieved snapshots belong to the user's book directory and are not bundled in the package. Availability, sampling scope, source URL and observation time are recorded; these sources do not endorse SpecWriter or establish that a writing method will succeed.

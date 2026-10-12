@@ -53,7 +53,7 @@ export function initProject(rootPath: string, name = '未命名小说', options:
     writeNew(safePath(root, 'specwriter', 'specs', `${name}.md`), readFileSync(join(assetsRoot, 'templates', `${name}.md`), 'utf8'));
   }
   writeNew(safePath(root, 'specwriter', 'plans', 'outline.md'), readFileSync(join(assetsRoot, 'templates', 'outline.md'), 'utf8'));
-  for (const directory of ['specwriter/plans/volumes', 'specwriter/work', 'specwriter/archive', 'specwriter/memory/views', 'manuscript/drafts', 'manuscript/chapters']) mkdirSync(safePath(root, directory), { recursive: true });
+  for (const directory of ['specwriter/plans/volumes', 'specwriter/research', 'specwriter/work', 'specwriter/archive', 'specwriter/memory/views', 'manuscript/drafts', 'manuscript/chapters']) mkdirSync(safePath(root, directory), { recursive: true });
   const store = new Store(root, true);
   store.close();
 
@@ -74,13 +74,22 @@ export function initProject(rootPath: string, name = '未命名小说', options:
   for (const entry of readdirSync(join(assetsRoot, 'skills'), { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     const skillPath = `.agents/skills/${entry.name}`;
-    managed(`${skillPath}/SKILL.md`, readFileSync(join(assetsRoot, 'skills', entry.name, 'SKILL.md'), 'utf8'));
+    const copySkill = (directory: string, destination: string): void => {
+      for (const item of readdirSync(directory, { withFileTypes: true })) {
+        if (item.isSymbolicLink()) throw new Error('Packaged skills cannot follow links');
+        const input = join(directory, item.name), output = `${destination}/${item.name}`;
+        if (item.isDirectory()) copySkill(input, output);
+        else if (item.isFile()) managed(output, readFileSync(input, 'utf8'));
+      }
+    };
+    copySkill(join(assetsRoot, 'skills', entry.name), skillPath);
     managed(`${skillPath}/references/protocol.md`, readFileSync(join(assetsRoot, 'protocol.md'), 'utf8'));
     managed(`${skillPath}/references/memory.md`, readFileSync(join(assetsRoot, 'memory.md'), 'utf8'));
     managed(`${skillPath}/references/benchmark.md`, readFileSync(join(assetsRoot, 'benchmark.md'), 'utf8'));
     managed(`${skillPath}/references/reader.md`, readFileSync(join(assetsRoot, 'reader.md'), 'utf8'));
     managed(`${skillPath}/references/versioning.md`, readFileSync(join(assetsRoot, 'versioning.md'), 'utf8'));
     managed(`${skillPath}/references/workflow.md`, readFileSync(join(assetsRoot, 'workflow.md'), 'utf8'));
+    managed(`${skillPath}/references/research.md`, readFileSync(join(assetsRoot, 'research.md'), 'utf8'));
     for (const schema of ['chapter-delta.schema.json', 'review.schema.json', 'chapter-intent.schema.json']) managed(`${skillPath}/references/${schema}`, readFileSync(join(schemasRoot, schema), 'utf8'));
     managed(`${skillPath}/references/THIRD_PARTY_NOTICES.md`, readFileSync(join(packageRoot, 'THIRD_PARTY_NOTICES.md'), 'utf8'));
     managed(`${skillPath}/references/licenses/ainovel-cli-Apache-2.0.txt`, readFileSync(join(packageRoot, 'licenses', 'ainovel-cli-Apache-2.0.txt'), 'utf8'));

@@ -69,6 +69,12 @@ export async function startReader(project: Project, options: ReaderScope & { por
           json(response, reader.writeExport(input.format as 'txt' | 'md' | 'html')); return;
         }
         if (path === '/api/feedback') { json(response, reader.addFeedback(await body(request)), 201); return; }
+        if (path === '/api/feedback/decision') {
+          const input = await body(request);
+          if (!input || typeof input.id !== 'string' || Object.keys(input).some(key => !['id', 'decision', 'reason', 'workId', 'anchor'].includes(key))) throw new Error('Invalid feedback decision fields');
+          const { id, ...decision } = input;
+          json(response, reader.feedbackDecision(id, decision)); return;
+        }
         if (path === '/api/feedback/resolve') {
           const input = await body(request);
           if (!input || typeof input.id !== 'string' || Object.keys(input).some(key => !['id', 'resolved'].includes(key))) throw new Error('Invalid resolution fields');

@@ -1,11 +1,16 @@
 #!/usr/bin/env node
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { configureMemory, findRoot, initProject } from './init.js';
-import { positiveInteger } from './files.js';
+import { atomicWrite, hash, identifier, json, positiveInteger, safePath } from './files.js';
 import { Project } from './project.js';
 import { MicrosoftGraphRag } from './microsoft-graphrag.js';
 import { WriterMemory } from './writer-memory.js';
 import { NovelReader } from './reader.js';
+import { AuthorInstructions } from './author-guidance.js';
+import { ResearchLibrary } from './research.js';
+import { collectMarket } from './market-sources.js';
+import { craftProfile, craftProfiles, useCraftProfile } from './craft.js';
 import { startReader } from './reader-server.js';
 import { spawn } from 'node:child_process';
 import { UsageLedger, validatePrices, type Prices } from './usage.js';
@@ -13,7 +18,7 @@ import { readJson } from './files.js';
 import { BookVersions } from './versions.js';
 import { runBenchmark, scoreBenchmark, type BenchmarkArm } from './benchmark.js';
 
-const help = `SpecWriter 0.8 — Codex fiction workflows + WriterMemory + local novel reader
+const help = `SpecWriter 0.10 — Codex fiction workflows + WriterMemory + research references
 
 Usage: specwriter <command> [arguments] [--root PATH] [--json]
 
@@ -97,12 +102,44 @@ Usage: specwriter <command> [arguments] [--root PATH] [--json]
   feedback request [--chapter N] [--work ID]
                                 Generate a revision request from open annotations
   feedback resolve ID [--reopen] Mark an annotation handled, or reopen it
+  feedback decide ID --decision adopt|decline|clarify --reason TEXT [--work ID --anchor FILE]
+                                Record the author's decision and version-bound revision target
+  feedback reconcile --chapter N --work ID
+                                Recover applied-feedback metadata after successful acceptance
+  instruction add ID --text TEXT --kind require|avoid --from N [--to N --work ID]
+                                Persist scoped author instructions; historical global changes need reconciliation
+  instruction list [--chapter N --work ID]
+  instruction retire ID --reason TEXT
+                                Withdraw future enforcement while preserving the decision record
+  research create ID --kind market|analysis|craft --title TEXT --question TEXT
+                [--platform TEXT --audience TEXT --window TEXT]
+                                Create an editable research draft; no canon changes
+  research capture ID --source ID --file UTF8_FILE --title TEXT
+                [--kind web|ranking|file|author --url URL --published-at ISO]
+                                Preserve a source excerpt with identity, time and hash
+  research save ID               Validate citations and record an immutable report version
+  research show ID [--draft]     Inspect recorded report or draft and its source catalog
+  research list                 List book-local research reports
+  research radar ID --platform fanqie|qidian [--limit N --timeout MS]
+                                Capture public ranking samples; report unavailable data explicitly
+  craft list|show [PROFILE]      Inspect original genre writing methods, without model calls
+  craft use PROFILE --as ID      Record a craft reference; author chooses which rules to adopt
 
-Codex: $specwriter (entry) + $specwriter-explore / propose / write / review / revise / commit / archive
+Codex: $specwriter (entry) + explore / propose / write / review / revise / commit / archive
+       + $specwriter-research / analyze / craft for external evidence and writing methods
 Codex writes prose, extraction and review artifacts. Default prepare/query use Microsoft
 GraphRAG and call configured models for nonempty corpora; explicit local mode uses no model.
 `;
 interface Arguments { positional: string[]; flags: Map<string, string | boolean> }
+function sourceText(path: string): string {
+  const absolute = resolve(path), name = basename(absolute).toLowerCase();
+  if (name === '.env' || name.startsWith('.env.') || /^(secrets?|credentials?)(\.|$)/.test(name)) throw new Error('Credential files are not research sources');
+  const info = statSync(absolute);
+  if (!info.isFile() || info.size > 1000000) throw new Error('Research capture needs a UTF-8 text excerpt no larger than 1 MB; select a smaller excerpt first');
+  const bytes = readFileSync(absolute);
+  if (bytes.includes(0)) throw new Error('Research capture needs UTF-8 text; extract binary documents first');
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes).replace(/^\uFEFF/, '');
+}
 function parseArguments(values: string[]): Arguments {
   const positional: string[] = [];
   const flags = new Map<string, string | boolean>();
@@ -131,7 +168,10 @@ async function main(): Promise<void> {
     hash: ['work'], verify: ['work'], commit: ['work'], memory: ['at', 'holder', 'limit', 'hops', 'python', 'model', 'embedding', 'env-file', 'credentials', 'provider', 'embedding-base', 'embedding-dimensions', 'reconfigure', 'preset', 'probe', 'method', 'backend', 'auto-index', 'retain', 'keep', 'rebuild', 'dry-run', 'prices', 'max-requests', 'max-tokens', 'max-cost', 'unknown-usage'], history: [], archive: [], sync: ['capture'], doctor: ['models', 'probe'],
     'review-requirements': ['work'], version: ['message', 'to', 'bundle', 'out'],
     benchmark: ['mode', 'dataset', 'out', 'provider', 'max-operations', 'arms', 'budget', 'method', 'run', 'ratings', 'prices'],
-    read: ['draft', 'work', 'port', 'no-open'], export: ['format'], feedback: ['chapter', 'work', 'reopen']
+    read: ['draft', 'work', 'port', 'no-open'], export: ['format'], feedback: ['chapter', 'work', 'reopen', 'decision', 'reason', 'anchor'],
+    instruction: ['chapter', 'work', 'text', 'kind', 'from', 'to', 'reason'],
+    research: ['kind', 'title', 'question', 'platform', 'audience', 'window', 'source', 'file', 'url', 'published-at', 'limit', 'timeout', 'draft'],
+    craft: ['as']
   };
   if (!allowed[command]) throw new Error(`Unknown command: ${command}`);
   for (const flag of args.flags.keys()) if (!['root', 'json', ...allowed[command]!].includes(flag)) throw new Error(`Unsupported option --${flag} for ${command}`);
@@ -148,6 +188,14 @@ async function main(): Promise<void> {
   };
   const count = (max: number): void => { if (args.positional.length > max) throw new Error('Too many positional arguments'); };
   const print = (value: unknown): void => { process.stdout.write(JSON.stringify(value, null, 2) + '\n'); };
+  if (command === 'craft' && args.positional[0] !== 'use') {
+    const action = position(0, 'craft action'); count(action === 'list' ? 1 : 2);
+    if (![...args.flags.keys()].every(flag => ['json', 'root'].includes(flag))) throw new Error('Craft options apply only to use');
+    if (action === 'list') print(craftProfiles());
+    else if (action === 'show') print(craftProfile(position(1, 'profile')));
+    else throw new Error('Craft action must be list, show or use');
+    return;
+  }
   if (command === 'init') {
     count(1);
     if (args.positional[0] && option('root')) throw new Error('Use init PATH or --root, not both');
@@ -197,6 +245,62 @@ async function main(): Promise<void> {
   const memoryOptions = { signal: controller.signal, onProgress: (progress: import('./microsoft-graphrag.js').IndexProgress) => process.stderr.write(JSON.stringify({ event: 'graphrag-progress', ...progress }) + '\n') };
   try {
     switch (command) {
+      case 'research': {
+        const library = new ResearchLibrary(project.root), action = position(0, 'research action');
+        const flags: Record<string, string[]> = {
+          create: ['kind', 'title', 'question', 'platform', 'audience', 'window'],
+          capture: ['source', 'file', 'title', 'kind', 'url', 'published-at'],
+          save: [], show: ['draft'], list: [], radar: ['platform', 'limit', 'timeout']
+        };
+        if (!flags[action]) throw new Error('Research action must be create, capture, save, show, list or radar');
+        for (const flag of args.flags.keys()) if (!['root', 'json', ...flags[action]!].includes(flag)) throw new Error(`Unsupported option --${flag} for research ${action}`);
+        count(action === 'list' ? 1 : 2);
+        const catalog = (id: string, sourceIds?: string[]) => (sourceIds === undefined ? library.listSources(id) : sourceIds.map(sourceId => library.source(id, sourceId)))
+          .map(({ content, ...metadata }) => ({ ...metadata, characters: content.length }));
+        if (action === 'list') { print(library.list()); break; }
+        const id = identifier(position(1, 'research id'));
+        if (action === 'create') print({ draftPath: project.store.transaction(() => library.create(id, { kind: option('kind', true)! as 'market' | 'analysis' | 'craft',
+          title: option('title', true)!, question: option('question', true)!, platform: option('platform'), audience: option('audience'), timeWindow: option('window') })) });
+        else if (action === 'capture') {
+          const content = sourceText(option('file', true)!);
+          const { content: _, ...source } = project.store.transaction(() => library.capture(id, { sourceId: option('source', true)!, title: option('title', true)!,
+            kind: (option('kind') ?? 'file') as 'web' | 'ranking' | 'file' | 'author', content, url: option('url'), publishedAt: option('published-at') }));
+          print({ ...source, characters: content.length });
+        } else if (action === 'save') print(project.store.transaction(() => library.save(id)));
+        else if (action === 'show') {
+          if (args.flags.has('draft')) print({ draftPath: safePath(project.root, 'specwriter', 'research', id, 'draft.json'), report: library.draft(id), sources: catalog(id) });
+          else { const version = library.show(id); print({ ...version, sources: catalog(id, version.sourceHashes.map(source => source.sourceId)) }); }
+        }
+        else {
+          const platform = option('platform', true)! as 'fanqie' | 'qidian';
+          if (!['fanqie', 'qidian'].includes(platform)) throw new Error('Radar platform must be fanqie or qidian');
+          const limit = option('limit') === undefined ? 15 : positiveInteger(option('limit'), 'limit');
+          const timeoutMs = option('timeout') === undefined ? 10000 : positiveInteger(option('timeout'), 'timeout');
+          if (limit > 50 || timeoutMs > 30000) throw new Error('Radar limit is 1..50; timeout is 1..30000 milliseconds');
+          const path = safePath(project.root, 'specwriter', 'research', id, 'draft.json');
+          if (existsSync(path)) { if (library.draft(id).kind !== 'market') throw new Error('Radar needs a market research report'); }
+          else project.store.transaction(() => library.create(id, { kind: 'market', title: `${platform} 榜单采样`, question: '这些公开榜单样本显示哪些题材信号，证据与限制是什么？', platform, timeWindow: '本次采样时刻' }));
+          const result = await collectMarket(platform, { limit, timeoutMs, signal: controller.signal });
+          const captured = project.store.transaction(() => result.sources.map(source => {
+            const sourceId = `${source.sourceId}-${hash(json(source)).slice(0, 12)}`;
+            return library.capture(id, { ...source, sourceId });
+          }));
+          const report = library.draft(id);
+          report.unknowns = [...new Set([...report.unknowns, ...result.issues.map(issue => `${issue.source}: ${issue.message}`),
+            '榜单只代表本次公开样本；作品类型、平台口径和目标读者需要核对，尚未形成市场结论。'])].slice(-20);
+          project.store.transaction(() => atomicWrite(path, json(report)));
+          print({ ...result, sources: captured.map(({ content, ...source }) => ({ ...source, characters: content.length })), sourceIds: captured.map(source => source.sourceId), draftPath: path,
+            nextAction: 'Read captured sources, complete the evidence/interpretation/directions in the draft, then research save; no report or canon was adopted automatically' });
+          if (result.status === 'unavailable') process.exitCode = 1;
+        }
+        break;
+      }
+      case 'craft': {
+        count(2);
+        if (position(0, 'craft action') !== 'use') throw new Error('Craft action must be list, show or use');
+        print(project.store.transaction(() => useCraftProfile(new ResearchLibrary(project.root), position(1, 'profile'), option('as', true)!)));
+        break;
+      }
       case 'status': count(0); print(project.status()); break;
       case 'resume': count(0); print(project.resume(option('work'))); break;
       case 'contract': {
@@ -262,7 +366,19 @@ async function main(): Promise<void> {
       }
       case 'feedback': {
         const reader = new NovelReader(project), action = position(0, 'feedback action');
-        if (action === 'resolve') {
+        const actionFlags: Record<string, string[]> = { resolve: ['reopen'], list: ['chapter', 'work'], request: ['chapter', 'work'], decide: ['decision', 'reason', 'work', 'anchor'], reconcile: ['chapter', 'work'] };
+        if (!actionFlags[action]) throw new Error('Feedback action must be list, request, resolve, decide or reconcile');
+        for (const flag of args.flags.keys()) if (!['root', 'json', ...actionFlags[action]!].includes(flag)) throw new Error(`Unsupported option --${flag} for feedback ${action}`);
+        if (action === 'decide') {
+          count(2);
+          print(reader.feedbackDecision(position(1, 'feedback id'), { decision: option('decision', true)! as 'adopt' | 'decline' | 'clarify', reason: option('reason', true)!,
+            ...(option('work') ? { workId: option('work') } : {}), ...(option('anchor') ? { anchor: readJson(option('anchor')!) } : {}) }));
+        } else if (action === 'reconcile') {
+          count(1); const chapter = positiveInteger(option('chapter', true), 'chapter'), work = option('work', true)!;
+          const revision = project.store.revisions().find(item => item.chapter === chapter && item.workId === work && !item.stale);
+          if (!revision) throw new Error('No current accepted revision from this work to reconcile');
+          print(reader.markFeedbackApplied(chapter, work, revision.id));
+        } else if (action === 'resolve') {
           count(2);
           if (option('chapter') || option('work')) throw new Error('Resolve feedback by its id');
           print(reader.resolveFeedback(position(1, 'feedback id'), !args.flags.has('reopen')));
@@ -275,6 +391,21 @@ async function main(): Promise<void> {
           if (key) reader.chapter(key);
           print(action === 'list' ? reader.feedback(key) : { text: reader.revisionRequest(key) });
         } else throw new Error('Feedback action must be list, request or resolve');
+        break;
+      }
+      case 'instruction': {
+        const instructions = new AuthorInstructions(project.root, project.store), action = position(0, 'instruction action');
+        const actionFlags: Record<string, string[]> = { add: ['text', 'kind', 'from', 'to', 'work'], list: ['chapter', 'work'], retire: ['reason'] };
+        if (!actionFlags[action]) throw new Error('Instruction action must be add, list or retire');
+        for (const flag of args.flags.keys()) if (!['root', 'json', ...actionFlags[action]!].includes(flag)) throw new Error(`Unsupported option --${flag} for instruction ${action}`);
+        count(action === 'list' ? 1 : 2);
+        if (action === 'list') print(instructions.list(option('chapter') === undefined ? undefined : positiveInteger(option('chapter'), 'chapter'), option('work')));
+        else if (action === 'retire') print(instructions.retire(position(1, 'instruction id'), option('reason', true)!));
+        else {
+          const result = instructions.add(position(1, 'instruction id'), { text: option('text', true)!, kind: (option('kind') ?? 'require') as 'require' | 'avoid',
+            fromChapter: positiveInteger(option('from', true), 'from'), toChapter: option('to') === undefined ? undefined : positiveInteger(option('to'), 'to'), workId: option('work') });
+          project.sync(); print(result);
+        }
         break;
       }
       case 'memory': {

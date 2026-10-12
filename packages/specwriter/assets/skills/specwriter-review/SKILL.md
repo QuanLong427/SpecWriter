@@ -12,3 +12,7 @@ description: 审阅 SpecWriter 章节或剧情段的连续性、创作约定与�
 提取完成后运行 `review-requirements N --work ID --json`。逐项审阅 criticalClaims，填写 critical_checks 的 claimHash、精确 evidenceQuote、verdict 和实际 explanation；只有原文确立结论才选 supported。不支持或不确定时修正候选提取、改为角色认知或报告阻塞问题，不为通过校验统一勾选。提取变化后重新获取清单。检索 assessment.accepted=false 时读取正式记忆及原文，在 retrieval_check 填当前 assessmentHash、use-formal-memory 和核对说明；不能采用被排除的回答。引用存在和规则检查通过都不能证明复杂语义成立。
 
 结构化上下文额外按 review-requirements.intentChecks 填 intent_checks（id、verdict、evidenceQuotes、explanation）。目标和认知需当前正文引用；暂不揭露事项可空引用，但应说明检查范围及没有提前揭露的依据。实际符合才 satisfied；角色知识须追溯获知路径，未登记不等于未知。
+
+按 review-requirements 全部 intentChecks 核对指示/采纳反馈：require 需当前正文引用，avoid 需核对范围，资料齐全不代替语义判断。反馈取舍保存理由，草稿审阅不表示正式落实；人工 resolve 不证明正文修改。
+
+已选研究/题材方法按 [研究协议](references/research.md) 核对用途、来源范围与采用状态。references 只是参考，不能从一个 profile 自动推导硬约束；有依据的风格改法通常作 suggestion/warning。按作者选定的读者承诺与文风审阅，不统一要求固定爽点、甜虐比例或节奏。报告引文/hash通过不证明市场推断或机制判断成立，外部分析不代替本书正文证据。

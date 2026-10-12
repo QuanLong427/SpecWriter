@@ -12,3 +12,7 @@ description: 在 SpecWriter 小说项目中继续写章节或执行已确定的�
 用场景实现本章目标，保留表达自由；遵守角色认知与读者揭露边界。正文完成后获取 hash，依据当前草稿填写版本 2 的 [事实 schema](references/chapter-delta.schema.json) 与 [审阅 schema](references/review.schema.json)，绑定 intentHash。证据标明 established/reported/inferred/imagined；重复引用填写精确字符偏移。审阅记录证据支持、提取遗漏和连续性三项实际检查依据，再运行 verify。不能复制示例检查说明来冒充审阅。授权范围内接纳，否则展示可审阅草稿和关键问题。批量写作按章检查与提交，不能把未写出的计划提前入库。
 
 位置、生死、境界、真实身份只能有一个当前世界状态；变更用 state_changes 并匹配 old_value。提取后运行 review-requirements，逐项填 critical_checks，按 specwriter-review 的审阅规则执行。context.retrieval.assessment 会说明来源缺失和已识别的当前状态/余额冲突；accepted=false 的回答不会进入续写素材，须用正式记忆和原文核对并填写 retrieval_check。人物相信、梦见或听说的结论不能直接记成世界真相。
+
+开始当前章检查适用 instruction 和反馈门禁，实际读 prepare 返回的 context；它不是模型上下文的强制替换。新要求记录 instruction，采纳批注按阅读协议，变化后 refresh 重审。review-requirements 全部指示/反馈检查须有实际依据，阻塞意见只开放明确目标修订，不越过继续后文。
+
+context 中显式选入的研究报告与来源按 [研究协议](references/research.md) 读取，遵守 intent.references 的 purpose 和本书已采用约定。外部作品只迁移抽象机制，不搬名字、表达或标志性情节；内置 craft 是可定制原创经验，不固定爽点计数或强制统一风格。资料更新后 save/refresh，不绕过来源预算；研究结论不作为人物已知或本书事件证据，默认 GraphRAG 仍只索引本书已接纳正文。

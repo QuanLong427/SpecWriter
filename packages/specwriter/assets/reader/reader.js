@@ -15,6 +15,23 @@ async function api(path, options = {}) {
 const node = (tag, text, className) => { const element = document.createElement(tag); if (text !== undefined) element.textContent = text; if (className) element.className = className; return element; };
 function localGet(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } }
 function localSet(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* reading works even with disabled browser storage */ } }
+function localRemove(key) { try { localStorage.removeItem(key); } catch { /* storage may be disabled */ } }
+function noteStorageKey(chapterKey) { return `specwriter:${state.book.bookId}:feedback-draft:${chapterKey}`; }
+function persistNote() {
+  if (!state.book || !state.chapter) return;
+  const draft = { note: $('note').value, blocking: $('note-blocking').checked, selection: state.selection };
+  if (!draft.note && !draft.blocking && !draft.selection) { state.notes.delete(state.chapter.key); localRemove(noteStorageKey(state.chapter.key)); return; }
+  state.notes.set(state.chapter.key, draft); localSet(noteStorageKey(state.chapter.key), draft);
+}
+function restoreNote(chapter) {
+  const draft = state.notes.get(chapter.key) ?? localGet(noteStorageKey(chapter.key), {});
+  $('note').value = typeof draft.note === 'string' ? draft.note.slice(0, 5000) : '';
+  $('note-blocking').checked = draft.blocking === true;
+  const selection = draft.selection;
+  if (selection && selection.chapterKey === chapter.key && selection.bodyHash === chapter.bodyHash && Number.isSafeInteger(selection.start) && Number.isSafeInteger(selection.end) && selection.start >= 0 && selection.end > selection.start && selection.end <= chapter.body.length && chapter.body.slice(selection.start, selection.end) === selection.quote) {
+    state.selection = selection; $('quote').textContent = selection.quote; $('clear-quote').hidden = false;
+  } else if (selection && $('note').value) $('feedback-status').textContent = '已恢复未保存意见；正文变化后，请重新选择引用。';
+}
 function settingKey() { return `specwriter:${state.book?.bookId ?? 'reader'}:settings`; }
 function positionKey(chapterKey) {
   const parts = chapterKey?.split(':');
@@ -42,7 +59,7 @@ function applySettings() {
   const settings = { font: state.font, leading: state.leading, theme: document.documentElement.dataset.theme || 'light' };
   localSet(settingKey(), settings); state.preferences.settings = settings; persistPreferences({ settings });
 }
-function clearQuote() { state.selection = null; $('quote').textContent = '整章意见'; $('clear-quote').hidden = true; }
+function clearQuote(persist = false) { state.selection = null; $('quote').textContent = '整章意见'; $('clear-quote').hidden = true; if (persist) persistNote(); }
 function renderProse(target, body, selectable = false) {
   target.replaceChildren();
   for (const match of body.matchAll(/[^\r\n]+(?:\r?\n(?![ \t]*\r?\n)[^\r\n]+)*/g)) {
@@ -74,6 +91,7 @@ function captureSelection() {
   const quote = state.chapter.body.slice(start, end);
   state.selection = { start, end, quote, chapterKey: state.chapter.key, bodyHash: state.chapter.bodyHash };
   $('quote').textContent = quote; $('clear-quote').hidden = false;
+  persistNote();
 }
 function savePosition() {
   if (!state.book || !state.chapter) return;
@@ -139,12 +157,12 @@ async function loadBook(preferred, restore = false) {
 }
 async function openChapter(key, ratio = 0, existingEpoch) {
   if (state.chapter && state.chapter.key !== key) savePosition();
-  if (state.chapter) state.notes.set(state.chapter.key, $('note').value);
+  if (state.chapter) persistNote();
   const epoch = existingEpoch ?? ++state.epoch;
   $('prose').setAttribute('aria-busy', 'true');
   const chapter = await api(`/api/chapter?key=${encodeURIComponent(key)}`);
   if (epoch !== state.epoch) return;
-  state.chapter = chapter; clearQuote(); $('note').value = state.notes.get(key) || '';
+  state.chapter = chapter; clearQuote();
   $('chapter-title').textContent = chapter.title;
   $('chapter-state').textContent = `第 ${chapter.chapter} 章 · ${statusLabels[chapter.status]}`;
   $('chapter-meta').textContent = `${chapter.characters.toLocaleString()} 字${chapter.revision ? ` · 版本 ${chapter.revision}` : ''}`;
@@ -153,6 +171,7 @@ async function openChapter(key, ratio = 0, existingEpoch) {
   renderProse($('prose'), chapter.body, true); $('prose').setAttribute('aria-busy', 'false');
   for (const id of ['save-note', 'copy-request', 'compare-open', 'chapter-picker']) $(id).disabled = false;
   $('note').setAttribute('aria-invalid', 'false'); $('feedback-status').textContent = '批注会绑定当前正文版本。';
+  restoreNote(chapter);
   const index = state.book.chapters.findIndex(item => item.key === key);
   $('previous').disabled = index <= 0; $('next').disabled = index < 0 || index >= state.book.chapters.length - 1;
   renderCatalog();
@@ -168,10 +187,48 @@ async function loadFeedback(key) {
   if (!items.length) $('feedback-list').append(node('p', '还没有批注。可以先记下读到这里的感受。', 'quiet'));
   for (const item of items) {
     const entry = node('section', undefined, `note${item.status === 'resolved' ? ' resolved' : ''}`);
-    entry.append(node('p', `${item.status === 'resolved' ? '已处理' : '待处理'}${item.outdated ? ' · 旧版本，需重新定位' : ''}`, 'quiet'));
+    const resolution = item.resolutionKind === 'manual' ? '人工标记已处理，未验证正文修改' : item.decision?.decision === 'decline' ? '已拒绝' : '已处理';
+    entry.append(node('p', `${item.applied ? `已落实 · 正式版本 ${item.applied.revisionId}` : item.status === 'resolved' ? resolution : '待处理'}${item.blocking && !item.applied && item.decision?.decision !== 'decline' ? ' · 先处理再继续' : ''}${item.outdated ? item.applied ? ' · 原批注版本保留供对照' : ' · 旧版本，需重新定位' : ''}`, 'quiet'));
     if (item.quote) entry.append(node('blockquote', item.quote));
     entry.append(node('p', item.note));
-    const button = node('button', item.status === 'resolved' ? '重新打开' : '标记已处理'); button.type = 'button';
+    if (item.decision) {
+      const labels = { adopt: '采纳', decline: '拒绝', clarify: '待澄清' };
+      entry.append(node('p', `${labels[item.decision.decision]}${item.decision.targetWorkId ? ` · 工作包 ${item.decision.targetWorkId}` : ''}：${item.decision.reason}`, 'decision-summary'));
+      if (item.decision.anchor && item.decision.anchor.bodyHash !== item.bodyHash) entry.append(node('p', '已按新正文重新定位，原引用保留供对照。', 'quiet'));
+    }
+    {
+      const details = node('details', undefined, 'decision-controls'); details.append(node('summary', '记录处理决定'));
+      const choice = node('select'); choice.setAttribute('aria-label', '处理决定');
+      const choices = item.decision?.decision === 'adopt' ? [['decline', '撤回采纳，保留已有正文']] : [['clarify', '需要澄清'], ['adopt', '采纳到修订包'], ['decline', '拒绝这条意见']];
+      for (const [value, label] of choices) { const option = node('option', label); option.value = value; choice.append(option); }
+      const work = node('select'); work.setAttribute('aria-label', '修订工作包'); work.hidden = true;
+      const suitable = state.book.works.filter(row => row.status === 'active' && row.fromChapter <= item.chapter && row.toChapter >= item.chapter);
+      if (!suitable.length) { const option = node('option', '先在 Codex 中创建本章修订包'); option.value = ''; work.append(option); }
+      for (const row of suitable) { const option = node('option', `${row.title} (${row.id})`); option.value = row.id; work.append(option); }
+      const reason = node('textarea'); reason.rows = 2; reason.maxLength = 5000; reason.placeholder = '写下采纳、拒绝或需要澄清的理由'; reason.setAttribute('aria-label', '处理理由');
+      const decide = node('button', '保存决定'); decide.type = 'button';
+      choice.addEventListener('change', () => { work.hidden = choice.value !== 'adopt'; });
+      decide.addEventListener('click', safely(async () => {
+        const input = { id: item.id, decision: choice.value, reason: reason.value };
+        if (choice.value === 'adopt') {
+          input.workId = work.value;
+          if (item.outdated) {
+            if (state.chapter?.key !== item.chapterKey) throw new Error('请先打开批注所属章节并重新选择引用。');
+            if (item.quote && !state.selection) throw new Error('旧版本引用必须重新选中当前正文中的对应段落。');
+            const selection = state.selection;
+            input.anchor = { bodyHash: state.chapter.bodyHash, start: selection?.start ?? 0, end: selection?.end ?? 0, quote: selection?.quote ?? '' };
+          }
+        }
+        decide.disabled = true;
+        try { await api('/api/feedback/decision', { method: 'POST', body: JSON.stringify(input) }); await loadFeedback(key); }
+        finally { decide.disabled = false; }
+      }));
+      details.append(choice, work, reason, decide); entry.append(details);
+    }
+    const button = node('button', item.status === 'resolved' ? '重新打开' : '人工标记已处理'); button.type = 'button';
+    button.hidden = Boolean(item.applied);
+    button.disabled = item.status === 'open' && item.blocking && !item.applied;
+    if (button.disabled) button.title = '请先记录拒绝理由，或采纳并在正式修订中落实。';
     button.addEventListener('click', safely(async () => {
       button.disabled = true;
       try { await api('/api/feedback/resolve', { method: 'POST', body: JSON.stringify({ id: item.id, resolved: item.status !== 'resolved' }) }); await loadFeedback(key); }
@@ -185,15 +242,18 @@ $('feedback-form').addEventListener('submit', safely(async event => {
   const quote = state.selection || { start: 0, end: 0, quote: '', chapterKey: chapter.key, bodyHash: chapter.bodyHash };
   const save = $('save-note'); save.disabled = true; save.textContent = '正在保存…'; save.setAttribute('aria-busy', 'true');
   try {
-    await api('/api/feedback', { method: 'POST', body: JSON.stringify({ ...quote, note }) });
+    const blocking = $('note-blocking').checked; $('note').disabled = true; $('note-blocking').disabled = true;
+    await api('/api/feedback', { method: 'POST', body: JSON.stringify({ ...quote, note, blocking }) });
     state.notes.delete(chapter.key);
-    if (state.chapter?.key === chapter.key) { $('note').value = ''; clearQuote(); $('feedback-status').textContent = '已保存，Codex 可以读取这条批注。'; await loadFeedback(chapter.key); }
+    localRemove(noteStorageKey(chapter.key));
+    if (state.chapter?.key === chapter.key) { $('note').value = ''; $('note-blocking').checked = false; clearQuote(); $('feedback-status').textContent = '已保存。复制请求或回到本书 Codex 对话安排修订。'; await loadFeedback(chapter.key); }
   } catch (error) { $('note').setAttribute('aria-invalid', 'true'); $('feedback-status').textContent = error.message; }
-  finally { save.disabled = !state.chapter; save.textContent = '保存批注'; save.setAttribute('aria-busy', 'false'); }
+  finally { save.disabled = !state.chapter; $('note').disabled = false; $('note-blocking').disabled = false; save.textContent = '保存批注'; save.setAttribute('aria-busy', 'false'); }
 }));
 document.addEventListener('selectionchange', captureSelection);
-$('clear-quote').addEventListener('click', clearQuote);
-$('note').addEventListener('input', () => $('note').setAttribute('aria-invalid', 'false'));
+$('clear-quote').addEventListener('click', () => clearQuote(true));
+$('note').addEventListener('input', () => { $('note').setAttribute('aria-invalid', 'false'); persistNote(); });
+$('note-blocking').addEventListener('change', persistNote);
 $('refresh').addEventListener('click', safely(async () => { message(); savePosition(); await loadBook(state.chapter?.key, true); }));
 $('chapter-picker').addEventListener('change', safely(() => openChapter($('chapter-picker').value)));
 $('accepted-mode').addEventListener('click', safely(async () => { savePosition(); state.scope = 'accepted'; await loadBook(undefined, true); }));
@@ -254,6 +314,6 @@ $('compare-open').addEventListener('click', safely(async () => {
 $('version-picker').addEventListener('change', safely(compareVersion));
 let scrolling;
 window.addEventListener('scroll', () => { clearTimeout(scrolling); scrolling = setTimeout(savePosition, 150); }, { passive: true });
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { savePosition(); flushPreferences(); } });
-window.addEventListener('pagehide', () => { savePosition(); flushPreferences(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { persistNote(); savePosition(); flushPreferences(); } });
+window.addEventListener('pagehide', () => { persistNote(); savePosition(); flushPreferences(); });
 safely(() => loadBook(undefined, true))();

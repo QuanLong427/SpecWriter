@@ -2,24 +2,26 @@ import { existsSync, readFileSync } from 'node:fs';
 import { atomicWrite, chapterId, hash, identifier, json, positiveInteger, readJson, safePath, writeNew } from './files.js';
 import { loadConfig } from './init.js';
 import { resolveEntityReference } from './entity-reference.js';
-import { currentFacts, replay, terms, trustedPrefix } from './memory.js';
+import { currentFacts, replay, terms } from './memory.js';
 import { stateField } from './memory-policy.js';
 import { Store } from './store.js';
 import { validateIntent } from './validation.js';
+import { projectViews } from './projections.js';
+import { ResearchLibrary } from './research.js';
 import type { AdoptedContract, ChapterIntent, ContextRequirements, MemoryState, WorkPolicy } from './types.js';
 
 export const resourceKey = (entity: string, resource: string) => JSON.stringify([entity, resource]);
 
 /** Book-scoped creation policy and readable task artifacts; never generates story facts. */
 export class StoryWorkflow {
-  constructor(readonly root: string, readonly store: Store) {}
+  constructor(readonly root: string, readonly store: Store, private readonly progress?: (work: import('./types.js').WorkItem) => ReturnType<typeof import('./work-progress.js').workProgress>) {}
   get structured(): boolean { return loadConfig(this.root).workflow === 'structured' || this.store.contracts().length > 0; }
   contract(chapter: number): AdoptedContract {
     const selected = this.store.contracts().filter(item => item.fromChapter <= chapter).sort((a, b) => b.fromChapter - a.fromChapter || b.id - a.id)[0];
     if (!selected) throw new Error(`No adopted creative contract for chapter ${chapter}; use contract adopt after the author selects the foundation`);
     return selected;
   }
-  adopt(reason: string, fromChapter = trustedPrefix(this.store.revisions()).length + 1) {
+  adopt(reason: string, fromChapter = (this.store.revisions().at(-1)?.chapter ?? 0) + 1) {
     positiveInteger(fromChapter, 'from');
     if (!reason.trim()) throw new Error('Contract adoption requires the author instruction or adoption reason');
     const sources = ['premise', 'world', 'characters', 'style'].map(name => {
@@ -28,8 +30,17 @@ export class StoryWorkflow {
       return { name, source, content, hash: hash(content) };
     });
     const existing = this.store.contracts().find(item => item.fromChapter === fromChapter && json(item.sources) === json(sources) && item.reason === reason);
-    if (existing) return { adopted: existing, reused: true };
-    return this.store.transaction(() => ({ adopted: this.store.adoptContract({ fromChapter, reason, adoptedAt: new Date().toISOString(), sources }), reused: false }));
+    if (existing) return { adopted: existing, reused: true, staleChapters: [] as number[] };
+    const result = this.store.transaction(() => {
+      const adopted = this.store.adoptContract({ fromChapter, reason, adoptedAt: new Date().toISOString(), sources });
+      const staleChapters = this.store.invalidateFrom(fromChapter);
+      return { adopted, reused: false, staleChapters };
+    });
+    // Adoption is canonical even if readable projection rebuilding fails; sync can recover it.
+    try {
+      projectViews(this.root, this.store.revisions(), this.store.works(), this.store.generation(), id => this.store.workRevisions(id), this.progress);
+      return { ...result, projectionNeedsSync: false };
+    } catch (error) { return { ...result, projectionNeedsSync: true, warning: (error as Error).message }; }
   }
   contracts() {
     return { mode: this.structured ? 'structured' : 'legacy', adopted: this.store.contracts().map(item => ({ ...item,
@@ -87,6 +98,7 @@ export class StoryWorkflow {
     if (work.status !== 'active' || chapter < work.fromChapter || chapter > work.toChapter) throw new Error('Intent is outside active work');
     requiredMemory(state, intent);
     for (const path of intent.planPaths) if (!existsSync(safePath(this.root, path))) throw new Error(`Selected plan is missing: ${path}`);
+    new ResearchLibrary(this.root).contextSources(intent.references ?? []);
     const markdown = renderIntent(intent);
     atomicWrite(safePath(this.root, `specwriter/work/${workId}/chapters/${chapterId(chapter)}/intent.md`), markdown);
     return { chapter, workId, path: this.intentPath(chapter, workId), intentHash: hash(markdown), intentDataHash: hash(json(intent)), query: intentQuery(intent), nextAction: `prepare ${chapter} --work ${workId}` };
@@ -142,6 +154,7 @@ export function intentChecks(intent: ChapterIntent) {
   return [
     { id: 'goal', description: intent.goal, requiresQuote: true },
     ...intent.knowledgeChecks.map((item, index) => ({ id: `knowledge:${index}`, description: `${item.holder} 对 ${item.topic} 的认知须有获知依据；作者知识不可泄漏给角色`, requiresQuote: true })),
-    ...intent.withhold.map((description, index) => ({ id: `withhold:${index}`, description, requiresQuote: false }))
+    ...intent.withhold.map((description, index) => ({ id: `withhold:${index}`, description, requiresQuote: false })),
+    ...(intent.references ?? []).map(reference => ({ id: `reference:${reference.id}`, description: `核对参考用途：${reference.purpose}；保留本书声音与事实边界，不能照搬外书内容或将研究推断当成已发生事实`, requiresQuote: true }))
   ];
 }

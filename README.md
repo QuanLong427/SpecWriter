@@ -2,7 +2,7 @@
 
 面向 Codex 的长篇小说创作工作流。作者提供想法、授权和阅读意见，Codex 通过 Skills 规划、写作与修订，WriterMemory 保存有正文证据、可追溯且带章节边界的长期记忆。
 
-**v0.8 已接通逐章创作闭环：设定与计划 → 章纲与记忆 → 草稿 → 提取与审阅 → 按授权接纳 → 阅读、批注和修订 → 下一章。** 自动卷回顾、完结检查及真实长篇质量验证仍在后续计划中。96 项回归测试与三章短篇流程演练的范围见 [验证报告](docs/v0.8-workflow-validation.md)。
+**v0.10 增加可追溯的创作研究：市场调研 → 拆书/题材方法 → 作者选定 → 设定与章纲 → 逐章创作和审阅。** 作者仍只需要 `$specwriter`；新增研究、分析与方法三个辅助 Skill，以及五类原创题材方法。报告保存来源与版本，章纲显式选择参考，不自动改设定或小说事实。验证范围见 [v0.10 报告](docs/v0.10-research-validation.md)，此前逐章创作与批注流程见 [v0.9 记录](docs/v0.9-workflow-validation.md)。自动卷回顾、完结检查仍未实现，真实长篇质量尚未验证。
 
 ## 作者怎么使用
 
@@ -33,6 +33,22 @@ $specwriter 帮我构思一部长篇河镇悬疑小说。
 
 Codex 用 explore/propose 整理四份创作约定和近期计划。作者先选定方案，Codex 再采用约定版本、建立有章节范围的工作包。全书大纲是方向，近期场景可以细化；未来计划不会作为已发生事实进入记忆。
 
+也可以先让 Codex 做研究或学习写法，再决定方向：
+
+```text
+$specwriter 调研番茄和起点当前公开榜单中的悬疑方向，
+记录来源、时间和实际可见范围，给我几种不同的读者承诺与原创选题。
+结合悬疑推理方法，说明适合我的慢热河镇故事的部分，先不改设定或写正文。
+```
+
+```text
+$specwriter 分析我提供的开篇三章材料，标明只读到哪里，
+解释场景、对白和信息揭露怎样推进；提炼可迁移机制，
+为我的人物和世界提出原创改法，不搬用原作表达或标志性情节。
+```
+
+当前市场信息使用 Codex 实际可用的联网搜索/浏览工具。CLI radar 仅抓公开榜单快照，不需额外搜索 API Key，也不是 Qwen 搜索能力；没有联网工具或页面无法访问时报告来源不足，可用作者文件/摘录，不编造最新数据。内置玄幻升级、都市职业、悬疑推理、言情关系、历史权谋方法是可定制原创经验，不声称热榜实证。作者选定做法后才整理并采用 Specs，报告不会自动变成约定或小说事实。见 [研究协议](packages/specwriter/assets/research.md)。
+
 ### 3. 采用方案，先看第一章草稿
 
 ```text
@@ -57,7 +73,11 @@ $specwriter 按我在阅读器中对第一章的批注修订草稿。
 重新提取事实并审阅，先把修改后的草稿给我看，不接纳。
 ```
 
-批注不会自动改正文。Codex 根据对话中的修订要求核对批注版本、修改正文并重新提取审阅；作者确认后再接纳。
+批注不自动发消息或改正文。复制请求带小说身份；Codex 核对目录与版本后记录采纳、拒绝或待澄清及理由。采纳意见进入目标章资料包与审阅，正式接纳后记录落实版本；只完成草稿仍待接纳，作者刷新页面查看。
+
+“已落实”是该工作包和修订版本的历史证明。要求以后所有修订都遵守时，Codex 应另存书籍 instruction 或采用新的 Specs；局部批注不会自动变成永久约定。
+
+勾选“先处理再继续”的意见在下一次 CLI 推进检查阻止后续；不会实时中断正在生成的 Codex 内容。精确采纳目标章允许修订，其余后续等待落实。过期意见先重新定位，人工处理标记不绕过门禁。见 [阅读协议](packages/specwriter/assets/reader.md)。
 
 ### 5. 接纳第一章，授权连续写后两章
 
@@ -67,7 +87,7 @@ $specwriter 接纳修改后的第一章。
 遇到阻塞矛盾时先停下处理，不越过第 3 章；我随时会提出修改意见。
 ```
 
-Codex 按实际授权逐章执行下方循环，到第 3 章边界停止。已给出的授权无需每章重复确认；需要作者判断的问题、暂停或用量限制仍会停止推进。
+Codex 按实际授权逐章执行下方循环，到第 3 章边界停止。已给授权不重复确认；需要作者判断的问题、暂停、阻塞批注或用量限制仍会停止。具体要求另保存有范围的 instruction，授权理由不代替创作指示。
 
 ```mermaid
 flowchart LR
@@ -110,16 +130,32 @@ $specwriter 回顾开篇三章的计划执行情况与遗留线索，归档已�
 
 启用 `version init` 后，每次接纳自动保存本书独立的 Git 检查点。单独改动设定、批注或归档工作包后再 `version save`；异地备份可导出 bundle。恢复到新目录，模型配置和索引需重新配置/构建，步骤见 [版本与备份](packages/specwriter/assets/versioning.md)。
 
+## 本章上下文怎么组成
+
+第 N 章重放第 1 至 N−1 章连续有效正式记忆，选入采用的四份 Specs、当前 proposal/章纲、适用作者指示、采纳批注、显式选中研究的报告/必要引文/来源元信息、必要人物状态/余额/事件/伏笔、上章结尾和 GraphRAG 原文引用。章纲 references 与计划路径分开，最多选择8份本书已保存报告并写明用途；研究资料条目受预算保护并纳入 context hash，完整捕获原文按来源路径读取核对。研究、外部作品、计划与草稿不进默认 GraphRAG 语料；旧章变更使后文需重审，不能用于当前正式记忆。久远线索可追加查询与原文核对。
+
+这些内容写到 context.json，由 Codex 按 Skill 实际读取。CLI 校验资料版本、审阅与接纳，不会强制清空/注入模型上下文，也无法证明读完材料。GraphRAG 来源可定位不代表每句推断正确，仍需 Codex 和作者核对。
+
+新要求应保存 instruction，再刷新本章资料并重审，例如：
+
+```text
+$specwriter 从第二章开始直到开篇结束，暂时不要揭露灯柄缺口用途。
+把要求保存到当前工作包的作者指示，更新章纲与上下文再继续。
+```
+
+书籍指示追溯已接纳章节时，受影响范围需按授权重审；单纯改 Spec 草稿不改变采用约定。详见 [创作流程](packages/specwriter/assets/workflow.md)。
+
 ## 小说目录里有什么
 
 | 位置 | 作者看到的内容 |
 | --- | --- |
 | `specwriter/specs/` | 故事前提、世界、人物、文风；采用版本另存于本书记忆库 |
 | `specwriter/plans/` | 全书方向和近期计划 |
+| `specwriter/research/` | 市场、拆书与方法报告草案、来源快照及已保存版本 |
 | `specwriter/work/<id>/` | 本轮意图、章节章纲、上下文、提取与审阅记录 |
 | `manuscript/drafts/` | 可审阅草稿 |
 | `manuscript/chapters/` | 已接纳正文的文件投影 |
-| `specwriter/feedback/` | 阅读批注 |
+| `specwriter/feedback/` | 版本绑定批注、取舍理由和正式落实版本 |
 | `specwriter/memory/views/` | 可阅读的人物、状态、认知、事件、资源和伏笔记录 |
 | `exports/` | 可交付的 TXT、Markdown 和 HTML |
 | `.specwriter/` | 本书正式记忆库、GraphRAG 数据、启动器和独立 Git 检查点 |
@@ -148,7 +184,7 @@ node .specwriter/bin/specwriter.mjs version save --message "开篇三章已归�
 
 `read` 会持续运行本地服务，打印地址并打开浏览器，Ctrl+C 停止。在其他终端执行后续命令。完整命令见 [CLI 文档](packages/specwriter/README.md)，不要仅靠 CLI 命令期待自动生成正文。
 
-总入口 `$specwriter` 协调七个专项 Skills：explore（构思）、propose（规划）、write（写章）、review（审阅）、revise（修订）、commit（接纳）、archive（归档）。实际名字是 `$specwriter-explore` 等，使用说明见 [创作流程](packages/specwriter/assets/workflow.md)。
+总入口 `$specwriter` 协调十个专项 Skills：research（市场调研）、analyze（拆书）、craft（题材方法）、explore（构思）、propose（规划）、write（写章）、review（审阅）、revise（修订）、commit（接纳）、archive（归档），共11个。Codex 根据作者意图路由，不要求作者记住内部名称。使用说明见 [创作流程](packages/specwriter/assets/workflow.md)。
 
 ## 开发者快速体验
 
@@ -179,17 +215,20 @@ npm.cmd run check
 
 ## 当前范围与后续工作
 
-当前有 8 个 Codex Skills、结构化创作约定与章纲、带证据的正文/记忆提交、默认 Microsoft GraphRAG、阅读批注、导出及独立 Git 备份。连续写作由 Codex 在授权范围内执行，没有独立无人值守写作服务。
+当前有11个 Codex Skills、可追溯研究库与公开榜单抓取、五类原创题材方法、结构化约定与章纲、独立作者指示、批注取舍与落实追踪、带证据的正文/记忆提交、默认 Microsoft GraphRAG、导出与独立 Git 备份。连续写作由 Codex 在授权范围内执行，没有独立无人值守写作服务。
 
 尚未完成自动卷回顾、整书完结检查、已有小说整本导入；3–6 万字、远距离依赖和百万字验证也未完成。规则校验和引用可定位不能证明语义判断或文学质量正确。后续按 [优化方案](docs/long-form-optimization-plan.md) 推进。
 
 - [安装与配置](install.md)
 - [完整创作协议](packages/specwriter/assets/workflow.md)
+- [研究、拆书与题材方法](packages/specwriter/assets/research.md)
 - [记忆记录与 GraphRAG](packages/specwriter/assets/memory.md)
 - [阅读、批注与导出](packages/specwriter/assets/reader.md)
 - [实验与质量评估](packages/specwriter/assets/benchmark.md)
 - [架构与数据边界](docs/specwriter-architecture.md)
-- [v0.8 验证范围](docs/v0.8-workflow-validation.md)
+- [v0.10 验证范围](docs/v0.10-research-validation.md)
+- [v0.9 历史验证](docs/v0.9-workflow-validation.md)
+- [v0.8 历史验证](docs/v0.8-workflow-validation.md)
 - [复用代码与许可证](packages/specwriter/THIRD_PARTY_NOTICES.md)
 
 ## 源码目录

@@ -24,11 +24,13 @@
 
 - `specwriter/specs/{premise,world,characters,style}.md`：创作约定，区分硬约束、创作目标和开放空间。模板初始为草案；根据作者意见明确采用的内容，保留待决问题。
 - `specwriter/plans/outline.md`、`volumes/*.md`：全书方向和滚动展开的卷计划，禁止作为已发生事件的证据。
+- `specwriter/research/<id>/draft.json`：市场、作品分析或方法报告草案；save 后以不可变版本与 current.json 保存，来源位于 sources/。观察、推断和作者选项分别记录，不自动采用 Specs 或入事实记忆。细节见 [研究协议](research.md)。
 - `specwriter/work/<id>/proposal.md`：这轮作者意图、范围、必须保留和避免、创作约定变更、回顾。
+- `instruction add/list/retire` 保存有章节/工作包范围的具体指示，见 [创作流程](workflow.md)。授权理由不代替创作指示。
 - `tasks.md`：自动生成进度，额外的作者待办写在 proposal 中。
-- `intent.json`：新书受 schema 校验的章纲，必选依赖、认知与揭露边界；intent save 生成 Markdown。
+- `intent.json`：新书受 schema 校验的章纲，必选依赖、认知与揭露边界；可选 references 显式指定本书研究报告及用途，和 planPaths 分开；intent save 生成 Markdown。
 - `intent.md`：本章目标、场景安排、视角、信息边界、必须保留与避免。
-- `context.json`：准备时实际加载的输入、原文、记忆与来源。不要手工改写。
+- `context.json`：本章选入的约定、指示、采纳反馈、原文、记忆与来源资料包。不要手改；Codex 须实际读取，CLI 不清空或强制注入模型上下文，版本通过不证明读完材料。
 - `manuscript/drafts/<work>/<chapter>.md`：草稿。
 - `memory-delta.json` 与 `review.json`：候选事实与审阅记录。细节阅读本目录中的 JSON Schema。
 - `manuscript/chapters/*.md`：已接纳正文的可编辑投影；直接修改需要导入草稿并重新接纳。
@@ -37,6 +39,16 @@
 - `specwriter/memory/views/*.md`：自动生成人物状态、认知、伏笔、时间线和摘要，不是第二份可手工维护的事实源。
 
 不要为了执行一个命令重写全部文档。全书保留方向，近期剧情展开细节；允许场景创造，偏离计划时记录原因并调整后续计划。
+
+## 研究与方法边界
+
+总入口按作者请求路由 research/analyze/craft，分别处理当前市场资料、可访问作品机制和原创题材经验。市场信息通过 Codex 可用的联网工具查证，radar 仅抓公开榜单快照、无需额外搜索 API Key，不是 Qwen 搜索。没有工具或页面不可读时用作者提供的材料并报告缺口，不能伪造最新榜单。拆书标明已读范围，引用只支持必要观察，不搬名字、表达或标志性情节；craft 可修改或拒绝，不强制固定爽点计数和统一风格。
+
+research create/capture/save 保存报告和来源。market/analysis 需要至少一份被引用的 web/ranking/file 来源及精确引文；craft 也需要来源和引文，可引用原创内置方法。quote/hash校验只证明捕获资料可定位，不能证明材料真实性、代表性、语义支持或写作有效。只有小说片段或方法时，文本定位假说存 analysis/craft；缺实际市场材料的 market 留草案，不以 file 类型冒充市场取证。未知内容与未测结果如实保留。保存报告不代表作者已选定或采用。
+
+章纲 references 是可选独立数组，最多8项不同报告的 `{id,purpose,revision?}`；省略 revision 使用最新已保存版本，指定则固定该版本。只能选择本书已 save 的报告及捕获来源，不把全库混入上下文，不将研究路径塞进 planPaths。报告、必要引文/引用位置与来源元信息/路径组成受预算保护的资料条目，纳入 context hash；完整捕获原文按路径读取核对，未声称全库全文已内嵌。不足时调整明确选用范围或预算，不能保留结论悄悄丢弃引文与来源。实际选中版本变化后重新 save/refresh 与审阅；绑定来源被改或缺失则拒绝校验。
+
+作者选择具体做法后整理 Specs 或有范围的 instruction，再按实际授权采用。references 仍是创作参考，不自动成为硬约束、角色已知或已发生事件。默认 GraphRAG 语料继续只含本书章节边界内已接纳正文，外部作品、榜单和方法报告不会进入该语料。
 
 ## 提取与审阅
 
@@ -74,4 +86,6 @@ memory-delta 中每条事件、状态变化、关系、伏笔、新人物和事�
 
 archive 只关闭工作包并保存文档/版本清单；不会把未写出的计划写入 Memory。未完成的章节不能归档。
 
-context.workflow 存在时还需按 review-requirements.intentChecks 逐项填写 intent_checks，见 workflow.md。contract adopt 固定版本，work authorize 控制范围和接纳模式，resume 无模型调用恢复实际任务。
+按 review-requirements.intentChecks 的当前清单填写 intent_checks，包含章纲检查与适用指示/采纳反馈。require 需当前正文引用，avoid 需实际核对说明；变化后刷新重审，不只替换哈希。指示不是事实。见 workflow.md。contract adopt 固定版本，work authorize 控制范围/接纳模式，resume 无模型恢复实际任务。
+
+feedback decide 保存取舍理由；采纳快照绑定目标包/章，正式接纳后记录 applied revision。commit 返回 feedbackNeedsReconcile=true 时，正文已接纳但反馈落实记录未完成；用 feedback reconcile 补记，不重复接纳。作者 blocking 在推进边界检查，精确采纳目标章可修订；manual resolve 不代表落实、不绕过门禁。页面不主动发消息或实时中断模型。

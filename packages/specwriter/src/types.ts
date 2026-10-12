@@ -120,7 +120,7 @@ export interface MemoryState {
 }
 export interface ContextSource {
   id: string;
-  kind: 'spec' | 'plan' | 'proposal' | 'intent' | 'prose' | 'retrieval';
+  kind: 'spec' | 'plan' | 'proposal' | 'intent' | 'prose' | 'retrieval' | 'instruction' | 'feedback' | 'research';
   source: string;
   reason: string;
   content: string;
@@ -142,6 +142,7 @@ export interface ChapterIntent {
   requiredEvents: string[]; requiredHooks: string[];
   knowledgeChecks: { holder: string; topic: string }[];
   withhold: string[]; expectedChanges: string[]; targetChars: number | null; planPaths: string[];
+  references?: { id: string; purpose: string; revision?: string }[];
 }
 export interface WorkPolicy {
   schemaVersion: 1; workId: string; fromChapter: number; toChapter: number;
@@ -171,6 +172,7 @@ export interface ContextPackage {
   sources: ContextSource[];
   contextHash: string;
   workflow?: { version: 1; contractId: number; intentDataHash: string; intent: ChapterIntent; requirements: ContextRequirements };
+  authorGuidance?: import('./author-guidance.js').AuthorGuidance;
 }
 export interface WorkItem {
   id: string;

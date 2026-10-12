@@ -15,6 +15,7 @@ export function validateIntent(value: unknown): asserts value is ChapterIntent {
   if (new Set(intent.newEntities.map(item => item.name.normalize('NFKC').trim().toLowerCase())).size !== intent.newEntities.length) throw new Error('Duplicate planned entity names');
   if (intent.pov !== null && !/^[a-z][a-z0-9_-]{0,63}$/.test(intent.pov)) throw new Error('Intent POV must be a stable entity id or null');
   if (intent.storyTime !== null && !intent.storyTime.trim()) throw new Error('Intent storyTime must be nonempty or null');
+  if (new Set(intent.references?.map(item => item.id)).size !== (intent.references?.length ?? 0)) throw new Error('Duplicate chapter research references');
   for (const path of intent.planPaths) if (!/^specwriter\/plans\/(?:[a-zA-Z0-9_\-\u4e00-\u9fff]+\/)*[a-zA-Z0-9_\-\u4e00-\u9fff]+\.md$/.test(path)) throw new Error('Intent planPaths must name Markdown files inside specwriter/plans');
 }
 export function validateDelta(value: unknown, body: string): asserts value is ChapterDelta {

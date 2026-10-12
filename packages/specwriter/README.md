@@ -4,7 +4,7 @@
 
 要求 Node.js 24+。Node 24 的 `node:sqlite` 会提示 experimental；当前实现与测试使用 Node 24.14。WriterMemory 默认使用 Microsoft GraphRAG，需要 Python >=3.11,<3.14、GraphRAG 3.3.x 和模型配置。显式 local 模式的检索不调用模型。
 
-本轮补齐重要边界：关键当前状态唯一性、声明与证据逐项审阅、检索引用状态与正式记忆冲突核对，以及每本小说独立的 Git 检查点和迁移恢复。自动核对覆盖常见明确句式，复杂语义仍由 Codex 审阅。
+v0.10 增加市场调研、拆书与题材方法三个辅助 Skill、带来源和版本的研究库、番茄/起点公开榜单快照和五类原创题材方法。章纲显式选中本书报告及来源，保存研究不自动改 Specs/canon；只有本书已接纳正文进入默认 GraphRAG。引用校验不能证明市场推断或文学质量，仍需 Codex 和作者判断。
 
 ## 作者从哪里开始
 
@@ -12,6 +12,8 @@
 
 | 阶段 | 发给 Codex 的示例 | 得到什么 |
 | --- | --- | --- |
+| 可选调研 | `$specwriter 查阅近期公开悬疑榜单，保存来源与日期，给我原创方向选项，先不改设定。` | 有范围、来源和限制的市场报告 |
+| 可选拆书/方法 | `$specwriter 分析我提供的开篇材料，只根据已读范围提炼机制，结合悬疑方法给本书原创改法。` | 机制分析与可定制方法参考 |
 | 构思 | `$specwriter 构思一部长篇河镇悬疑小说，先给我四份设定和开篇三章计划，暂不写正文。` | 可审阅的创作约定和近期计划 |
 | 第一章草稿 | `$specwriter 采用当前设定，把开篇三章作为工作包，本次只授权第一章草稿。完成章纲、写作、提取和审阅后给我看，先不接纳。` | 已采用约定、draft 授权、章纲和可阅读草稿 |
 | 草稿修订 | `$specwriter 按阅读器中第一章的批注修订，重新提取审阅，先给我看。` | 修改后的草稿和版本绑定的审阅 |
@@ -22,16 +24,38 @@
 
 **第一章未接纳时不能准备第二章。** 连续创作按章进行：章纲与取记忆 → 草稿 → 提取审阅 → verify → 按授权 commit → 下一章。draft 只允许写和审阅，auto 才能接纳；不能先生成全部三章草稿再共用正式记忆。已有明确授权无需每章重复确认，到范围边界停止。
 
-阅读器负责阅读与批注，正文由 Codex 修订。小说目录中运行 `node .specwriter/bin/specwriter.mjs read` 看正式正文；草稿用 `read --draft --work ID`，ID 取实际工作包。命令持续运行，Ctrl+C 停止；后续命令使用其他终端。批注后在对话中要求 Codex 修订，批注本身不自动改文。
+阅读器负责阅读与批注，正文由 Codex 修订。小说目录中运行 `node .specwriter/bin/specwriter.mjs read` 看正式正文；草稿用 `read --draft --work ID`，ID 取实际工作包。命令持续运行，Ctrl+C 停止；后续命令使用其他终端。批注后在对话要求修订，页面不自动发消息或改文。采纳意见进入资料包与审阅，正式接纳绑定落实版本；作者可选择“先处理再继续”阻止后续推进。
 
 旧章重新接纳会让后文记忆需要重审，按授权逐章协调后再导出；过期批注要重新定位。`exports/novel.{txt,md,html}` 只包含连续有效正式章节。启用 version init 后接纳自动备份；单独改设定、批注或归档后 version save。每本书的数据隔离，Python/Ollama/BGE-M3 可以共用。
 
 完整内部步骤见 [创作流程](assets/workflow.md) 和 [阅读协议](assets/reader.md)。当前逐章闭环已经连通；回顾由 Codex 在工作文档中记录，尚未提供独立自动卷回顾、完结检查或无人值守服务。三章固定样例验证流程，不能作为百万字或文学质量保证。
 
+作者通常只用 `$specwriter`，Codex 按目的路由。需要当前市场证据时使用 Codex 实际可用的联网工具；没有工具或页面不可读时说明来源不足，可用作者文件/摘录，不能伪造最新榜单。CLI radar 无额外搜索 API Key，只抓公开榜单快照，不是 Qwen 搜索。内置五类 craft 为原创经验，可混合、定制或拒绝，不要求统一风格或固定爽点数量。流程可为“研究 → 作者选定 → Specs 采用 → 章纲 references → 写作/审阅”，普通构思无需强制调研。详见 [研究协议](assets/research.md)。
+
+
+## v0.9：保存作者指示与批注落实
+
+`instruction add/list/retire` 保存章节与可选工作包范围，进入本章 context/指纹/审阅。require 需正文引用，avoid 需核对说明；不能替代自动接纳权限或只保存在授权 reason。
+
+```powershell
+node .specwriter/bin/specwriter.mjs instruction add no-reveal --text "开篇暂不揭露旧灯用途" --kind avoid --from 1 --to 3 --work opening
+node .specwriter/bin/specwriter.mjs instruction list --chapter 1 --work opening
+node .specwriter/bin/specwriter.mjs instruction retire no-reveal --reason "作者允许后续揭露"
+node .specwriter/bin/specwriter.mjs feedback decide UUID --decision adopt --reason "按作者意见修正获知过程" --work revise-one
+node .specwriter/bin/specwriter.mjs feedback reconcile --chapter 1 --work revise-one
+```
+
+ID/范围取实际记录。本书指示省略 --to 可持续适用；--work 限定工作包，此时必须明确 --from/--to 且范围在 active 工作包内；书籍追溯指示使受影响正式范围需重审，retire 不改写历史快照。feedback decide 支持 adopt/decline/clarify 及理由；采纳快照进入目标章 context/hash/intent_checks。旧批注需 --anchor FILE 定位当前来源正文（bodyHash/start/end/quote），原旧引用保留。
+
+阅读器由作者选择“先处理再继续”。门禁在下一次 CLI 检查生效，不自动发消息或中断 Codex；明确采纳目标章可修订，其余后续等待落实。正式接纳绑定 applied revision，只完成草稿仍待接纳；落实记录失败用 reconcile 补记，不能重复 commit。人工 resolve 不证明已改文、不绕过阻塞。
+
+applied 是特定工作包和修订的历史证明，不是对所有未来改稿的永久约束。长期要求另记不限定 --work 的书籍 instruction，或更新并采用 Specs；不能从局部批注推定全书规则。
+
+历史修订后的完成与归档核对当前有效版本，追溯采用 Specs 要顺序协调；旧包历史草稿不再误挡已完成进度。真实长篇质量仍未验证，详见 [创作流程](assets/workflow.md) 与 [阅读协议](assets/reader.md)。context.json 是 Codex 按 Skill 读取的资料包，CLI 不强制清空/注入模型上下文；规则通过不证明读完材料、推断或文学质量正确。
 
 ## v0.8：把创作任务和记忆接起来
 
-新增总入口 `$specwriter`，由 Codex 按作者意图协调已有七个专项 Skills。新书默认 structured 工作流：先采用四份创作约定，再记录工作范围和接纳模式，完成结构化章纲后 prepare。完整步骤见 [创作流程](assets/workflow.md)。
+总入口 `$specwriter` 按作者意图协调十个专项 Skills，共11个；市场调研、拆书和题材方法是可选的前期或修订能力。新书默认 structured 工作流：先采用四份创作约定，再记录工作范围和接纳模式，完成结构化章纲后 prepare。完整步骤见 [创作流程](assets/workflow.md)。
 
 `contract adopt` 将 Spec 快照保存在本书 SQLite 中，按章节选版本。改草稿 Spec 不会改变已采用约定；再次采用会使未完成上下文失效，不修改已接纳正文。`intent seed/save` 管理 intent.json 和生成的 intent.md。章纲绑定目标、场景、人物、POV、故事时间、必选状态/资源/事件/伏笔和揭露边界；未来计划不会入库。
 
@@ -106,6 +130,9 @@ node packages/specwriter/dist/cli.js init E:\novels\my-book --name "我的小说
 | Skill | 用途 |
 | --- | --- |
 | `$specwriter` | 开始或恢复创作，协调专项流程 |
+| `$specwriter-research` | 有日期和来源的市场/公开榜单调研与方向选项 |
+| `$specwriter-analyze` | 对可访问作品材料作已读范围明确的机制分析 |
+| `$specwriter-craft` | 选择、保存和定制原创题材方法 |
 | `$specwriter-explore` | 构思、讨论与解决剧情卡点 |
 | `$specwriter-propose` | 建立创作约定、卷计划和有范围的工作包 |
 | `$specwriter-write` | 记忆检索、章纲、正文、提取与审阅 |
@@ -114,7 +141,7 @@ node packages/specwriter/dist/cli.js init E:\novels\my-book --name "我的小说
 | `$specwriter-commit` | 接纳正文与长期记忆 |
 | `$specwriter-archive` | 工作包完成回顾与归档 |
 
-例如：先让 Codex 用 propose 建立修仙悬疑小说的四份 Spec 和开篇计划，再用 write 写第一章，最后用 commit 接纳当前版本。斜杠命令 `/sw:*` 尚未实现；Codex 集成使用 Skills。
+共11个 Skills，通常无需分别调用。例如：`$specwriter 先调研和分析材料，给我修仙悬疑的原创方案，不写正文`；作者选定后采用四份 Spec 和开篇计划，再写第一章并按授权接纳。斜杠命令 `/sw:*` 尚未实现；Codex 集成使用 Skills。
 
 ## CLI 及文档
 
@@ -149,11 +176,35 @@ node .specwriter/bin/specwriter.mjs doctor
 
 CLI 默认输出 JSON；`--json` 还会将错误格式化为 JSON（写到 stderr）。详情见 `--help`。进度可从项目子目录恢复，或显式传 `--root`。
 
+### 研究库与题材方法命令
+
+```powershell
+node .specwriter/bin/specwriter.mjs research create opening-market --kind market --title "开篇定位" --question "本书有哪些值得验证的读者承诺？" --platform "番茄与起点" --window "本次公开快照"
+node .specwriter/bin/specwriter.mjs research radar opening-market --platform fanqie --limit 10 --timeout 10000
+node .specwriter/bin/specwriter.mjs research show opening-market --draft
+# Codex 读取来源，编辑 create 返回的 draft.json 后：
+node .specwriter/bin/specwriter.mjs research save opening-market
+node .specwriter/bin/specwriter.mjs research show opening-market
+node .specwriter/bin/specwriter.mjs research list
+node .specwriter/bin/specwriter.mjs craft list
+node .specwriter/bin/specwriter.mjs craft show mystery-deduction
+node .specwriter/bin/specwriter.mjs craft use mystery-deduction --as opening-method
+```
+
+capture 用 `research capture ID --source SOURCE_ID --file UTF8_FILE --title TITLE` 保存已取得材料，支持 `--kind web|ranking|file|author --url URL --published-at ISO`。报告支持 market/analysis/craft，观察绑定原文短引文，推断与方向列来源 ID，未知项单列。market/analysis 至少引用一个 web/ranking/file 来源；方法也需来源和引文。没有来源可以留草案，不能 save 冒充研究。save 生成不可变版本，引用/hash校验仅证明资料可定位，不证明推断正确。详细字段见 [研究协议](assets/research.md)。
+
+研究报告和来源绑定本书稳定 bookId。旧书缺少身份时原有流程仍可恢复，但研究操作会明确拒绝，需先完成明确的身份迁移；不以 null 或别书身份共享资料。
+
+radar 默认每组最多15条，limit为每组1–50，timeout为每请求含正文1–30000毫秒；ready/partial/unavailable说明本次采集状态，partial不是完整榜单。公开页面可因改版、网络或反爬失败，按 issues 报告来源缺口。该命令不调用模型、无搜索 Key，不等同通用联网调研。
+
+需要本章参考时在 intent.json 填 `"references": [{"id": "opening-method", "purpose": "核对调查场景的认识变化"}]`，最多8份不同的本书已 save 报告。可加 research show 返回的64位 revision 固定版本；省略取最新已保存版。references 和 planPaths 分开，报告/必要引文/来源元信息组成受预算保护的条目并纳入 context hash，完整捕获原文按路径读取核对；实际选中版本变化后 intent save、prepare --refresh 并重审。报告与外部作品不进入默认 GraphRAG，不自动改约定或事实。
+
 | 路径 | 职责 |
 | --- | --- |
 | `specwriter/config.yaml` | 项目配置和字符预算 |
 | `specwriter/specs/*.md` | premise、world、characters、style 创作约定 |
 | `specwriter/plans/` | 全书方向、滚动卷计划 |
+| `specwriter/research/<id>/` | draft.json、sources/ 捕获来源、versions/ 已保存报告和 current.json |
 | `specwriter/work/<id>/` | proposal、自动 tasks 和章节 intent/context/delta/review |
 | `manuscript/drafts/` | 未接纳草稿和导入稿 |
 | `manuscript/chapters/` | 已接纳正文的投影 |
@@ -237,7 +288,7 @@ node .specwriter/bin/specwriter.mjs export --format html
 
 read 自动打开浏览器；服务仅绑定本机，Ctrl+C 停止。目录支持正式/草稿切换、连续阅读、阅读进度、字号、行距、夜间主题、版本对照和段落批注。偏好与各范围进度存于 `.specwriter/reader/preferences.json`，服务重启、随机端口改变后可恢复；正文改动后不沿用旧滚动偏移。Codex 写完后刷新正文即可看到新内容，不要求 GraphRAG 或模型凭据。
 
-批注绑定正文版本与精确引用。按“复制给 Codex”粘贴修订请求，或直接让 Codex 使用 feedback list 读取意见；原文改变时旧批注标为过期。阅读器与 CLI 均可导出 TXT/Markdown/独立 HTML 到 exports/，只包含连续有效的正式章节；草稿与需要重审的后续章节排除。详见 [阅读协议](assets/reader.md)。现有小说重新运行 init 会安装新的阅读协议和更新未被作者改写的 Skills，保留正文与创作约定。
+批注绑定版本与精确引用。“复制给 Codex”含书名/bookId/目录，作者粘贴或让 Codex 读取 feedback list。旧意见采纳先重新定位；feedback decide 保存采纳/拒绝/待澄清理由，正式接纳后绑定落实版本。“先处理再继续”在下一次 CLI 检查生效，页面不主动唤醒或终止 Codex。阅读器与 CLI 均可导出 TXT/Markdown/独立 HTML 到 exports/，只包含连续有效的正式章节；草稿与需要重审的后续章节排除。详见 [阅读协议](assets/reader.md)。现有小说重新运行 init 会安装新的阅读协议和更新未被作者改写的 Skills，保留正文与创作约定。
 
 ## 验证与当前范围
 

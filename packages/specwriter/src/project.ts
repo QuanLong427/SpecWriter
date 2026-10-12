@@ -13,19 +13,31 @@ import { assessRetrieval, criticalClaims, reviewCriticalClaims } from './memory-
 import { BookVersions } from './versions.js';
 import { UsageLedger } from './usage.js';
 import { StoryWorkflow, intentChecks, intentQuery, renderIntent, requiredMemory, resourceKey } from './workflow.js';
+import { workProgress } from './work-progress.js';
+import { AuthorInstructions, guidanceChecks, type AuthorGuidance } from './author-guidance.js';
+import { NovelReader } from './reader.js';
+import { ResearchLibrary } from './research.js';
 import type { ChapterDelta, ChapterReview, ContextPackage, ContextSource, MemoryState, Revision, WorkItem } from './types.js';
 
 export class Project {
   readonly root: string;
   readonly store: Store;
   readonly workflow: StoryWorkflow;
+  readonly instructions: AuthorInstructions;
+  readonly research: ResearchLibrary;
   constructor(root: string) {
     this.root = resolve(root);
     loadConfig(this.root);
     this.store = new Store(this.root);
-    this.workflow = new StoryWorkflow(this.root, this.store);
+    this.workflow = new StoryWorkflow(this.root, this.store, work => this.progress(work));
+    this.instructions = new AuthorInstructions(this.root, this.store);
+    this.research = new ResearchLibrary(this.root);
+    try { this.instructions.reconcile(); }
+    catch (error) { this.store.close(); throw error; }
   }
   close(): void { this.store.close(); }
+  /** Also protects long-lived readers after interrupted file/DB instruction publication. */
+  assertInstructionConsistency(): void { this.instructions.reconcile(); }
   private graphSnapshot(state: MemoryState, revisions: Revision[]) {
     const identity = graphIdentity(revisions, state.atChapter);
     const cached = this.store.cachedGraph(identity.snapshotId);
@@ -40,6 +52,7 @@ export class Project {
     return dirtyFiles(this.root, revisions, known);
   }
   private assertClean(): void {
+    this.assertInstructionConsistency();
     const dirty = this.dirty(this.store.revisions());
     if (dirty.length) throw new Error(`Accepted prose projection differs: ${dirty.map(item => item.path).join(', ')}. Run sync (or sync --capture to preserve direct edits).`);
   }
@@ -51,6 +64,19 @@ export class Project {
   }
   private inputSources(workId: string, chapter?: number): ContextSource[] {
     const sources: ContextSource[] = [];
+    if (chapter !== undefined) {
+      const guidance = this.authorGuidance(chapter, workId);
+      for (const instruction of guidance?.instructions ?? []) {
+        const content = json(instruction);
+        sources.push({ id: `instruction:${instruction.id}`, kind: 'instruction', source: `specwriter/instructions/${instruction.id}.json`, content, hash: hash(content),
+          reason: '作者明确指示；不是已发生事实；本章必须逐项审阅', protection: 'protected' });
+      }
+      for (const directive of guidance?.feedback ?? []) {
+        const content = json(directive);
+        sources.push({ id: `feedback:${directive.feedbackId}`, kind: 'feedback', source: `specwriter/feedback/${directive.feedbackId}.json`, content, hash: hash(content),
+          reason: '已采用的版本绑定批注；原文引用是待修订对象，本章须提供落实证据', protection: 'protected' });
+      }
+    }
     if (this.workflow.structured && chapter !== undefined) {
       const contract = this.workflow.contract(chapter), intent = this.workflow.readIntent(chapter, workId);
       const markdown = renderIntent(intent), source = this.chapterPaths(workId, chapter).intent;
@@ -60,6 +86,7 @@ export class Project {
         const content = readFileSync(this.path(path), 'utf8');
         sources.push({ id: path, kind: 'plan', source: path, content, hash: hash(content), reason: '章纲选中的当前计划；不是正式事实', protection: 'compressible' });
       }
+      sources.push(...this.research.contextSources(intent.references ?? []));
       const proposal = `specwriter/work/${workId}/proposal.md`, content = readFileSync(this.path(proposal), 'utf8');
       sources.push({ id: proposal, kind: 'proposal', source: proposal, content, hash: hash(content), reason: '本轮作者意图', protection: 'protected' });
       sources.push({ id: source, kind: 'intent', source, content: markdown, hash: hash(markdown), reason: '已校验的本章目标、依赖与认知边界', protection: 'protected' });
@@ -108,11 +135,13 @@ export class Project {
       reason: '上一章已接纳结尾；直接衔接必须保留，全文可按需读取', chapter: previous.chapter, revision: previous.id, protection: 'protected' };
   }
   private checkProtectedBudget(chapter: number, workId: string, budget: number): void {
-    const intent = this.workflow.readIntent(chapter, workId), state = replay(this.store.revisions(), chapter - 1), required = requiredMemory(state, intent);
+    const intent = this.workflow.structured ? this.workflow.readIntent(chapter, workId) : undefined, state = replay(this.store.revisions(), chapter - 1);
+    const required = intent ? requiredMemory(state, intent) : { factIds: [], entityIds: [], eventIds: [], hookIds: [], resourceKeys: [], knowledgeGaps: [] };
     const sources = this.inputSources(workId, chapter).filter(item => item.protection === 'protected');
-    if (chapter > 1) sources.push(this.previousEnding(chapter));
+    if (intent && chapter > 1) sources.push(this.previousEnding(chapter));
     // Lower bound before paid index/query; full context is checked again after retrieval.
-    const minimum = json({ sources, workflow: { version: 1, contractId: this.workflow.contract(chapter).id, intentDataHash: hash(json(intent)), intent, requirements: required },
+    const minimum = json({ sources, ...(intent ? { workflow: { version: 1, contractId: this.workflow.contract(chapter).id, intentDataHash: hash(json(intent)), intent, requirements: required } } : {}),
+      authorGuidance: this.authorGuidance(chapter, workId),
       memory: { facts: currentFacts(state).filter(item => required.factIds.includes(item.id)), entities: state.entities.filter(item => required.entityIds.includes(item.id)),
         episodes: state.episodes.filter(item => required.eventIds.includes(item.id)), hooks: state.hooks.filter(item => required.hookIds.includes(item.id)),
         resources: state.resources.filter(item => required.resourceKeys.includes(resourceKey(item.entity, item.resource))) } }).length;
@@ -127,7 +156,24 @@ export class Project {
       delta: `${directory}/memory-delta.json`, review: `${directory}/review.json`
     };
   }
+  workProgress(workId: string) {
+    const work = this.store.work(identifier(workId));
+    return this.progress(work);
+  }
+  private authorGuidance(chapter: number, workId: string): AuthorGuidance | undefined {
+    const instructions = this.instructions.list(chapter, workId), feedback = new NovelReader(this).guidance(chapter, workId);
+    return instructions.length || feedback.length ? { version: 1, instructions, feedback } : undefined;
+  }
+  private progress(work: WorkItem, revisions = this.store.revisions()) {
+    const instructions = this.instructions.list().filter(item => item.status === 'active');
+    const feedback = new NovelReader(this).feedback().flatMap(item => item.decision?.decision === 'adopt' ? [item.decision.directive!] : []);
+    return workProgress(this.root, work, revisions, this.store.workRevisions(work.id), chapter => ({
+      version: 1, instructions: instructions.filter(item => (item.workId === null || item.workId === work.id) && chapter >= item.fromChapter && (item.toChapter === null || chapter <= item.toChapter)),
+      feedback: feedback.filter(item => item.targetWorkId === work.id && item.chapter === chapter)
+    }));
+  }
   status() {
+    this.assertInstructionConsistency();
     const revisions = this.store.revisions();
     const trusted = trustedPrefix(revisions);
     const dirty = this.dirty(revisions);
@@ -136,25 +182,22 @@ export class Project {
     let projectedGeneration: number | null = null;
     try { projectedGeneration = readJson<{ generation: number }>(markerPath).generation; } catch { /* report missing/corrupt projection */ }
     const works = this.store.works();
+    let research: { reports: ReturnType<ResearchLibrary['list']>; error: string | null };
+    try { research = { reports: this.research.list(), error: null }; }
+    catch (error) { research = { reports: [], error: (error as Error).message }; }
+    const progressByWork = new Map(works.map(work => [work.id, this.progress(work, revisions)]));
     const pending = works.filter(work => work.status === 'active').flatMap(work => {
       const result: { workId: string; chapter: number; stage: string; needsRefresh: boolean }[] = [];
-      for (let chapter = work.fromChapter; chapter <= work.toChapter; chapter++) {
+      for (const progress of progressByWork.get(work.id)!) {
+        if (!progress.pending) continue;
+        const chapter = progress.chapter;
         const paths = this.chapterPaths(work.id, chapter);
-        if (!existsSync(this.path(paths.context))) continue;
         let needsRefresh = true;
-        let preparedContext: ContextPackage | undefined;
         try {
           const context = readJson<ContextPackage>(this.path(paths.context));
-          preparedContext = context;
           needsRefresh = context.generation !== generation || context.inputFingerprint !== this.fingerprint(this.inputSources(work.id, chapter));
           if (context.retrieval?.receiptId && !context.sources.some(source => source.kind === 'retrieval' && existsSync(this.path(source.source)))) needsRefresh = true;
         } catch { /* report broken draft context */ }
-        const revision = revisions.find(item => item.chapter === chapter);
-        // A work may contain a prepared revision of an already accepted chapter.
-        if (revision?.workId === work.id && !revision.stale) {
-          const draftPath = this.path(paths.draft);
-          if (existsSync(draftPath) && hash(readFileSync(draftPath, 'utf8')) === revision.bodyHash && preparedContext && json(preparedContext) === json(revision.context)) continue;
-        }
         result.push({ workId: work.id, chapter, stage: existsSync(this.path(paths.draft)) && readFileSync(this.path(paths.draft), 'utf8').trim() ? 'draft' : 'prepared', needsRefresh });
       }
       return result;
@@ -167,7 +210,10 @@ export class Project {
       memoryThrough: trusted.length, nextChapter: trusted.length + 1,
       staleChapters: revisions.filter(item => item.stale).map(item => item.chapter),
       dirtyFiles: dirty, projectionNeedsSync: projectedGeneration !== generation,
-      works, pending,
+      works, pending, workProgress: works.map(work => ({ workId: work.id, chapters: progressByWork.get(work.id)! })),
+      authorInstructions: this.instructions.list(),
+      research,
+      authorFeedback: new NovelReader(this).feedback().filter(item => item.status === 'open').map(item => ({ id: item.id, chapter: item.chapter, blocking: item.blocking ?? false, decision: item.decision ?? null })),
       workflow: { mode: this.workflow.structured ? 'structured' : 'legacy', contracts: this.store.contracts().map(item => ({ id: item.id, fromChapter: item.fromChapter })), policies: works.map(work => this.store.policy(work.id)).filter(Boolean) },
       nextAction: dirty.length ? 'sync; modified prose requires sync --capture' : trusted.length < revisions.length ? `reconcile chapter ${trusted.length + 1}` : `prepare chapter ${trusted.length + 1}`
     };
@@ -182,12 +228,23 @@ export class Project {
     if (status.dirtyFiles.length) return { ...result, stage: 'sync', nextAction: 'sync --capture', detail: 'Preserve modified accepted prose before recovering the writing task.' };
     if (status.projectionNeedsSync) return { ...result, stage: 'sync', nextAction: 'sync', detail: 'Rebuild readable projections before advancing.' };
     if (!work) return { ...result, nextAction: active.length ? 'resume --work ID' : 'propose ID --title TITLE --from N --to N', detail: active.length ? 'Select the intended active work; no task was chosen automatically.' : 'Choose a new scope from the author instruction.' };
+    const reader = new NovelReader(this);
+    const unreconciled = reader.feedback().find(item => item.decision?.decision === 'adopt' && item.decision.targetWorkId === work.id && !item.applied &&
+      this.store.revisions().some(revision => !revision.stale && revision.chapter === item.chapter && revision.workId === work.id &&
+        revision.context.authorGuidance?.feedback.some(saved => json(saved) === json(item.decision!.directive))));
+    if (unreconciled) return { ...result, chapter: unreconciled.chapter, stage: 'feedback-reconcile', nextAction: `feedback reconcile --chapter ${unreconciled.chapter} --work ${work.id}`, detail: 'Accepted prose already contains this adopted instruction; recover its applied-version metadata before continuing.' };
     const next = status.nextChapter;
-    const pending = status.pending.filter(item => item.workId === work.id && item.chapter <= next).sort((a,b) => a.chapter - b.chapter)[0];
-    const chapter = pending?.chapter ?? Math.max(work.fromChapter, next);
-    if (chapter > work.toChapter) return { ...result, stage: 'complete', nextAction: `archive ${work.id}`, detail: 'This work range is reconciled; obtain new scope before writing beyond it.' };
+    const incomplete = status.workProgress.find(item => item.workId === work.id)!.chapters.find(item => !item.completed);
+    if (!incomplete) {
+      try { reader.assertFeedbackAdvance(work.toChapter, work.id); }
+      catch (error) { return { ...result, stage: 'feedback', nextAction: 'feedback list', detail: (error as Error).message }; }
+      return { ...result, stage: 'complete', nextAction: `archive ${work.id}`, detail: 'This work accepted its scope with no pending candidates; obtain new scope before writing beyond it.' };
+    }
+    const chapter = incomplete.chapter;
     result.chapter = chapter;
     result.paths = { ...this.chapterPaths(work.id, chapter), intentData: this.workflow.intentPath(chapter, work.id) };
+    try { reader.assertFeedbackAdvance(chapter, work.id); }
+    catch (error) { return { ...result, stage: 'feedback', nextAction: 'feedback list', detail: (error as Error).message }; }
     if (chapter > next) return { ...result, stage: 'reconcile', nextAction: `resume --work ID`, detail: `Chapter ${next} must be accepted/reconciled first; select work covering it.` };
     if (this.workflow.structured) {
       try { this.workflow.contract(chapter); }
@@ -225,11 +282,12 @@ export class Project {
       const config = loadConfig(this.root);
       positiveInteger(options.budget ?? config.contextBudgetChars, 'budget');
       this.workflow.assertAdvance(chapter, workId);
+      new NovelReader(this).assertFeedbackAdvance(chapter, workId);
       const intent = this.workflow.structured ? this.workflow.readIntent(chapter, workId) : undefined;
       if (intent) requiredMemory(replay(revisions, chapter - 1), intent);
       const query = options.query?.trim() || (intent ? intentQuery(intent) : config.memory!.backend === 'microsoft-graphrag' ? defaultMemoryQuery : '');
       this.ensureIntent(chapter, workId, query);
-      if (intent) this.checkProtectedBudget(chapter, workId, options.budget ?? config.contextBudgetChars);
+      this.checkProtectedBudget(chapter, workId, options.budget ?? config.contextBudgetChars);
       return { chapter, atChapter: chapter - 1, query, backend: config.memory!.backend, method: config.memory!.method!, autoIndex: config.memory!.autoIndex!,
         token: this.prepareToken(chapter, workId) };
     });
@@ -245,7 +303,7 @@ export class Project {
       // Scaffold first; a failed DB transaction leaves recoverable author files, never overwrites them.
       writeNew(this.path('specwriter', 'work', workId, 'proposal.md'), `# ${title}\n\n范围：第 ${from}–${to} 章。\n\n## 作者意图与读者体验\n\n## 必须保留与避免\n\n## 计划与场景方向\n\n## 创作约定变更（如有）\n\n## 完成后回顾与遗留问题\n`);
       this.store.addWork(work);
-      projectViews(this.root, this.store.revisions(), this.store.works(), this.store.generation());
+      projectViews(this.root, this.store.revisions(), this.store.works(), this.store.generation(), id => this.store.workRevisions(id), work => this.progress(work));
     });
     return work;
   }
@@ -285,6 +343,7 @@ export class Project {
       schemaVersion: 1, contractVersion: 2, reviewPolicyVersion: 1, intentHash: inputs.find(item => item.kind === 'intent')!.hash, chapter, workId, baseRevision, generation: this.store.generation(),
       inputFingerprint: this.fingerprint(inputs), query, budgetChars, selectedChars: 0,
       ...(intent ? { workflow: { version: 1 as const, contractId: this.workflow.contract(chapter).id, intentDataHash: hash(json(intent)), intent, requirements: requirements! } } : {}),
+      ...(this.authorGuidance(chapter, workId) ? { authorGuidance: this.authorGuidance(chapter, workId) } : {}),
       memory, memorySelection: { strategy: microsoft ? 'microsoft-graphrag' : 'hybrid-graphrag', totalActiveFacts: activeFacts.length, selectedFacts: memory.facts.length, totalHooks: fullMemory.hooks.length, selectedHooks: memory.hooks.length, totalEpisodes: fullMemory.episodes.length, selectedEpisodes: memory.episodes.length },
       retrieval: { engine: microsoft ? 'microsoft-graphrag' : retrieval.engine, snapshotId: retrieval.snapshotId, hops: retrieval.hops, seedIds: retrieval.seedIds, paths: retrieval.paths.slice(0, 8),
         ...(microsoft ? { status: semantic ? 'ready' as const : 'empty' as const, method: config.memory!.method,
@@ -360,6 +419,7 @@ export class Project {
   private prepareArtifacts(chapter: number, workId: string, options: { query?: string; budget?: number; refresh?: boolean; expectedToken?: string }) {
     this.assertWork(workId, chapter); this.assertClean();
     this.workflow.assertAdvance(chapter, workId);
+    new NovelReader(this).assertFeedbackAdvance(chapter, workId);
     this.ensureIntent(chapter, workId, options.query);
     const token = this.prepareToken(chapter, workId);
     if (options.expectedToken && options.expectedToken !== token) throw new Error('Book or creative inputs changed during GraphRAG preparation; retry prepare with current inputs');
@@ -377,7 +437,7 @@ export class Project {
       title: '', summary: '', characters: [], key_events: [], timeline_events: [], foreshadow_updates: [], relationship_changes: [], state_changes: [], cast_intros: [], facts: [], entities: [], narrative_events: [], resource_changes: []
     };
     const review = { schemaVersion: 2, chapter, contextHash: context.contextHash, intentHash: context.intentHash, draftHash: '', reviewed: false, issues: [], notes: [], critical_checks: [],
-      ...(context.workflow ? { intent_checks: [] } : {}),
+      ...(context.workflow || context.authorGuidance ? { intent_checks: [] } : {}),
       ...(context.retrieval?.assessment && !context.retrieval.assessment.accepted ? { retrieval_check: { assessmentHash: context.retrieval.assessment.assessmentHash, decision: 'use-formal-memory', notes: '' } } : {}),
       checks: { evidence: { checked: false, notes: [] }, coverage: { checked: false, notes: [] }, continuity: { checked: false, notes: [] } } };
     const reset = (path: string, value: string): void => {
@@ -404,11 +464,12 @@ export class Project {
     validateDelta(delta, readFileSync(this.path(paths.draft), 'utf8'));
     const context = readJson<ContextPackage>(this.path(paths.context));
     return { ...this.hashes(chapter, workId), criticalClaims: criticalClaims(delta), retrievalAssessment: context.retrieval?.assessment ?? null,
-      intentChecks: context.workflow ? intentChecks(context.workflow.intent) : [] };
+      intentChecks: [...(context.workflow ? intentChecks(context.workflow.intent) : []), ...guidanceChecks(context.authorGuidance)] };
   }
   private verified(chapter: number, workId: string) {
     const paths = this.chapterPaths(workId, chapter);
     this.assertWork(workId, chapter); this.assertClean();
+    new NovelReader(this).assertFeedbackAdvance(chapter, workId);
     const context = readJson<ContextPackage>(this.path(paths.context));
     const expected = this.buildContext(chapter, workId, context.query, context.budgetChars);
     if (context.contextHash !== expected.contextHash || hash(json({ ...context, contextHash: '' })) !== context.contextHash) throw new Error('Context is stale or modified; prepare --refresh and re-extract/review');
@@ -417,8 +478,8 @@ export class Project {
     const delta: unknown = readJson(this.path(paths.delta));
     const review: unknown = readJson(this.path(paths.review));
     validateDelta(delta, body); validateReview(review);
-    if (context.workflow) {
-      const expectedChecks = intentChecks(context.workflow.intent), checks = review.intent_checks ?? [];
+    if (context.workflow || context.authorGuidance) {
+      const expectedChecks = [...(context.workflow ? intentChecks(context.workflow.intent) : []), ...guidanceChecks(context.authorGuidance)], checks = review.intent_checks ?? [];
       const ids = new Set(checks.map(item => item.id));
       if (ids.size !== checks.length || checks.some(item => !expectedChecks.some(expected => expected.id === item.id))) throw new Error('Duplicate or outdated intent review; review the current chapter intent');
       for (const expected of expectedChecks) {
@@ -464,15 +525,19 @@ export class Project {
       this.graphSnapshot(replay(revisions), revisions);
       return { chapter, revision, generation: this.store.generation(), staleChapters: this.store.revisions().filter(item => item.stale).map(item => item.chapter) };
     });
+    let feedbackWarning: string | undefined;
+    try { new NovelReader(this).markFeedbackApplied(chapter, workId, accepted.revision); }
+    catch (error) { feedbackWarning = (error as Error).message; }
+    const result = { ...accepted, ...(feedbackWarning ? { feedbackNeedsReconcile: true, feedbackWarning } : {}) };
     // DB acceptance is authoritative. File projection failures are recoverable, not a failed acceptance.
     try { this.sync(); }
-    catch (error) { return { ...accepted, projectionNeedsSync: true, warning: (error as Error).message }; }
+    catch (error) { return { ...result, projectionNeedsSync: true, warning: (error as Error).message }; }
     const versioning = loadConfig(this.root).versioning;
     if (versioning?.enabled && versioning.autoSave) {
-      try { return { ...accepted, projectionNeedsSync: false, versionCheckpoint: new BookVersions(this.root).save(this, `接纳第 ${chapter} 章：${this.store.revisions().find(item => item.chapter === chapter)!.delta.title}`) }; }
-      catch (error) { return { ...accepted, projectionNeedsSync: false, versionCheckpoint: { saved: false, warning: (error as Error).message }, versionNeedsSave: true }; }
+      try { return { ...result, projectionNeedsSync: false, versionCheckpoint: new BookVersions(this.root).save(this, `接纳第 ${chapter} 章：${this.store.revisions().find(item => item.chapter === chapter)!.delta.title}`) }; }
+      catch (error) { return { ...result, projectionNeedsSync: false, versionCheckpoint: { saved: false, warning: (error as Error).message }, versionNeedsSave: true }; }
     }
-    return { ...accepted, projectionNeedsSync: false };
+    return { ...result, projectionNeedsSync: false };
   }
   sync(options: { capture?: boolean } = {}) {
     return this.store.transaction(() => {
@@ -493,11 +558,14 @@ export class Project {
         const path = this.path('manuscript', 'chapters', `${chapterId(revision.chapter)}.md`);
         if (!existsSync(path) || hash(readFileSync(path, 'utf8')) !== revision.bodyHash) atomicWrite(path, revision.body);
       }
-      projectViews(this.root, revisions, this.store.works(), this.store.generation());
+      projectViews(this.root, revisions, this.store.works(), this.store.generation(), id => this.store.workRevisions(id), work => this.progress(work, revisions));
       return { generation: this.store.generation(), memoryThrough: trustedPrefix(revisions).length, captured };
     });
   }
-  memory(atChapter?: number) { return replay(this.store.revisions(), atChapter); }
+  memory(atChapter?: number) {
+    const read = () => { this.assertInstructionConsistency(); return replay(this.store.revisions(), atChapter); };
+    return this.store.db.isTransaction ? read() : this.store.transaction(read);
+  }
   /** Immutable accepted-prefix corpus; drafts, plans and stale later chapters are excluded. */
   corpus(atChapter?: number) {
     const read = () => {
@@ -557,10 +625,13 @@ export class Project {
   archive(workId: string) {
     return this.store.transaction(() => {
       const work = this.store.work(identifier(workId)); this.assertClean();
+      const reader = new NovelReader(this);
+      reader.assertFeedbackAdvance(work.toChapter, workId);
+      const unapplied = reader.feedback().find(item => item.decision?.decision === 'adopt' && item.decision.targetWorkId === workId && !item.applied);
+      if (unapplied) throw new Error(`Cannot archive adopted feedback without its accepted application record: ${unapplied.id}; finish revision or feedback reconcile first`);
       const revisions = this.store.revisions();
-      for (let chapter = work.fromChapter; chapter <= work.toChapter; chapter++) {
-        if (!trustedPrefix(revisions).some(item => item.chapter === chapter)) throw new Error(`Cannot archive incomplete work; chapter ${chapter} is not reconciled`);
-      }
+      const incomplete = this.progress(work, revisions).find(item => !item.completed);
+      if (incomplete) throw new Error(`Cannot archive incomplete work; chapter ${incomplete.chapter} has not been accepted by this work or has a pending candidate/reconciliation`);
       const destination = this.path('specwriter', 'archive', workId);
       if (work.status === 'active') {
         const source = this.path('specwriter', 'work', workId);
@@ -578,7 +649,7 @@ export class Project {
         this.store.archiveWork(workId);
         atomicWrite(safePath(source, 'tasks.md'), `# ${work.title}\n\n状态：archived。文档快照位于 specwriter/archive/${workId}。\n`);
       }
-      projectViews(this.root, revisions, this.store.works(), this.store.generation());
+      projectViews(this.root, revisions, this.store.works(), this.store.generation(), id => this.store.workRevisions(id), work => this.progress(work, revisions));
       return { workId, status: 'archived', directory: relative(this.root, destination).replaceAll('\\', '/'), generation: this.store.generation() };
     });
   }
@@ -591,6 +662,7 @@ export class Project {
     errors.push(...status.dirtyFiles.map(item => `${item.kind}: ${item.path}`));
     if (status.staleChapters.length) warnings.push(`Memory reconciliation required for chapters ${status.staleChapters.join(', ')}`);
     if (status.projectionNeedsSync) warnings.push('Readable projections need sync');
+    if (status.research.error) warnings.push(`Research references need inspection: ${status.research.error}`);
     if (status.memoryBackend === 'microsoft-graphrag' && !status.graphRagConfigured) warnings.push('Default Microsoft GraphRAG needs provider setup and model credentials before retrieving accepted chapters');
     for (const revision of this.store.revisions()) {
       if (hash(revision.body) !== revision.bodyHash) errors.push(`Stored body hash mismatch: ${revision.chapter}`);

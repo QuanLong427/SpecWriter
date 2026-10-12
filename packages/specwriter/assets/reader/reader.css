@@ -62,6 +62,13 @@ blockquote { margin: var(--space-md) 0; padding: var(--space-sm); background: va
 .note p { white-space: pre-wrap; margin: var(--space-xs) 0; }
 .note button { font-size: var(--text-sm); }
 .note.resolved { opacity: .65; }
+.blocking-choice { display: flex; gap: var(--space-xs); align-items: flex-start; margin-top: var(--space-sm); font-size: var(--text-sm); }
+.blocking-choice input { width: auto; flex: none; margin-top: .3em; }
+.decision-summary { font-size: var(--text-sm); }
+.decision-controls { margin-block: var(--space-sm); }
+.decision-controls summary { cursor: pointer; font-size: var(--text-sm); }
+.decision-controls select, .decision-controls textarea { width: 100%; margin-top: var(--space-xs); }
+.decision-controls button { margin-top: var(--space-xs); }
 .footnote { margin-top: var(--space-lg); }
 .message { padding: var(--space-sm) var(--space-md); background: var(--color-paper-2); color: var(--color-error); overflow-wrap: anywhere; }
 .message[data-state="success"] { color: var(--color-ink); }

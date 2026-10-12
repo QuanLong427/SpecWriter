@@ -1,6 +1,6 @@
 # 交给 Codex 执行的 SpecWriter 安装指南
 
-适用版本：SpecWriter 0.8.x。主要环境：Windows＋PowerShell。目标是把 SpecWriter 安装到本机，配置 Microsoft GraphRAG＋Qwen＋本地 BGE-M3，创建可在 Codex 中使用的独立小说目录。
+适用版本：SpecWriter 0.10.x。主要环境：Windows＋PowerShell。目标是把 SpecWriter 安装到本机，配置 Microsoft GraphRAG＋Qwen＋本地 BGE-M3，创建可在 Codex 中使用的独立小说目录，并安装研究、分析与题材方法等11个 Skills。
 
 ## 用户怎么使用这份文件
 
@@ -93,7 +93,7 @@ node "$SwCliPath" help
 
 ```powershell
 $SwInstallRoot = '替换为专用安装目录的绝对路径'
-$SwPackageFile = '替换为本地 specwriter-0.8.x.tgz 的绝对路径'
+$SwPackageFile = '替换为本地 specwriter-0.10.x.tgz 的绝对路径'
 npm.cmd install --prefix "$SwInstallRoot" "$SwPackageFile"
 $SwPackageRoot = Join-Path $SwInstallRoot 'node_modules/specwriter'
 $SwRuntimeRoot = $SwInstallRoot
@@ -168,6 +168,8 @@ node "$SwCliPath" init "$SwBookRoot" --name "$SwBookName" --json
 
 既有 SpecWriter 小说只在需要更新启动器或 Skills 时重新 init，先检查其 status；不要覆盖作者修改的 Skills 或 Spec。init 返回 preserved 时报告被保留的文件，不把它们当作安装失败后直接替换。
 
+v0.10 init 递归安装 Skills 自带参考文件及共用 research 协议；已有作者自定义 Skill 保留，受保护的旧入口可能需要作者根据新版说明手动合并。检查完整的11个入口和相关 references，而非只复制 SKILL.md。研究库按书隔离，升级不自动采用报告、改约定或把外部资料加入 GraphRAG。
+
 确认小说 `.specwriter/bin/specwriter.mjs` 存在后，切换到小说目录配置：
 
 ```powershell
@@ -200,7 +202,9 @@ node .specwriter/bin/specwriter.mjs doctor --models --json
 node .specwriter/bin/specwriter.mjs version status --json
 ```
 
-检查 doctor.healthy=true、models.runtime.ready=true、models.configured=true，且 init 生成的 8 个 `.agents/skills/specwriter*/SKILL.md`（总入口＋7 个专项） 和本地启动器完整。新版 status.backup 应可读取检查点；若作者文档在初始化后又改动，needsSave=true 是待保存，不伪报为 Git 故障。
+检查 doctor.healthy=true、models.runtime.ready=true、models.configured=true，且 init 生成的11个 `.agents/skills/specwriter*/SKILL.md`（总入口＋10个专项）、各 Skill 的相关 references 和本地启动器完整。新增入口为 specwriter-research、specwriter-analyze、specwriter-craft。新版 status.backup 应可读取检查点；若作者文档在初始化后又改动，needsSave=true 是待保存，不伪报为 Git 故障。
+
+不调用模型的题材方法检查可以运行 `node .specwriter/bin/specwriter.mjs craft list --json`，应返回五类原创方法。联网调研使用 Codex 当前可用的搜索/浏览工具，不需要配置额外搜索 Key；CLI radar 只抓公开榜单快照，不是 Qwen 搜索能力。没有联网工具、网络或公开页面访问失败时报告来源不足，不影响已完成的本地方法安装，也不能声称市场数据已验证。安装阶段无需创建市场报告、采用空模板或主动抓榜单。
 
 已有小请求探测授权时执行一次：
 
@@ -239,9 +243,9 @@ node .specwriter/bin/specwriter.mjs read --no-open
 
 > 按我授权的范围连续写三章，每章完成审阅后接纳，我随时会提出修改意见。
 
-推荐 `$specwriter` 总入口，按创作流程采用约定、记录授权并完成 intent 后写作。新书 resume 显示未开始/缺少约定或工作包是正常状态，安装阶段不采用空模板或伪造写作授权。也可以使用 `$specwriter-explore`、`$specwriter-propose`、`$specwriter-write`、`$specwriter-review`、`$specwriter-revise`、`$specwriter-commit`、`$specwriter-archive`。
+推荐 `$specwriter` 总入口，Codex 按作者意图自动路由研究、拆书、题材方法、构思和写作。需要时先“调研 → 拆书/题材方法 → 作者选定 → Specs 采用 → 章纲 references → 写章/审阅”；普通构思无需强制调研。新书 resume 显示未开始/缺少约定或工作包是正常状态，安装阶段不采用空模板或伪造写作授权。专项入口为 `$specwriter-research`、`$specwriter-analyze`、`$specwriter-craft`、`$specwriter-explore`、`$specwriter-propose`、`$specwriter-write`、`$specwriter-review`、`$specwriter-revise`、`$specwriter-commit`、`$specwriter-archive`，作者通常无需分别调用。
 
-阅读时在小说目录运行 `node .specwriter/bin/specwriter.mjs read`；通过阅读器批注，再让 Codex 读取反馈修订。正式导出使用 `export --format txt`、`md` 或 `html`。首次创作由 Codex 阅读生成的 AGENTS.md、Skills 和协议执行，不要求作者手工填写提取或审阅 JSON。
+阅读时在小说目录运行 `node .specwriter/bin/specwriter.mjs read`；保存批注后将带小说身份的“复制给 Codex”请求粘贴到本书对话，或让 Codex 读取反馈。采纳意见进入目标章资料包/审阅，正式接纳后绑定落实版本；“先处理再继续”在后续 CLI 检查阻止推进，不自动发消息或中断正在生成的内容。正式导出使用 `export --format txt`、`md` 或 `html`。首次创作由 Codex 阅读生成的 AGENTS.md、Skills 和协议执行，不要求作者手工填写提取或审阅 JSON。
 
 安装目录后续移动或升级，需用新的 CLI 对各小说重新 init 更新启动器；模型参数改变按既有小说的提示处理。不同小说的正文/记忆/索引隔离，Python、Ollama 和 BGE 模型可以共用。
 

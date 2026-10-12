@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Research report draft; observations are external evidence, never novel canon",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "bookId", "kind", "title", "question", "platform", "audience", "timeWindow", "observations", "interpretations", "directions", "unknowns"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": { "$ref": "#/$defs/id" },
+    "bookId": { "type": ["string", "null"], "maxLength": 36 },
+    "kind": { "enum": ["market", "analysis", "craft"] },
+    "title": { "$ref": "#/$defs/title" },
+    "question": { "$ref": "#/$defs/text" },
+    "platform": { "$ref": "#/$defs/optionalText" },
+    "audience": { "$ref": "#/$defs/optionalText" },
+    "timeWindow": { "$ref": "#/$defs/optionalText" },
+    "observations": {
+      "type": "array", "maxItems": 32,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["text", "evidence"],
+        "properties": {
+          "text": { "$ref": "#/$defs/text" },
+          "evidence": {
+            "type": "array", "minItems": 1, "maxItems": 8,
+            "items": {
+              "type": "object", "additionalProperties": false, "required": ["sourceId", "quote"],
+              "properties": { "sourceId": { "$ref": "#/$defs/id" }, "quote": { "$ref": "#/$defs/quote" } }
+            }
+          }
+        }
+      }
+    },
+    "interpretations": {
+      "type": "array", "maxItems": 32,
+      "items": { "type": "object", "additionalProperties": false, "required": ["text", "sourceIds"], "properties": { "text": { "$ref": "#/$defs/text" }, "sourceIds": { "$ref": "#/$defs/ids" } } }
+    },
+    "directions": {
+      "type": "array", "maxItems": 16,
+      "items": { "type": "object", "additionalProperties": false, "required": ["title", "premise", "reason", "sourceIds"], "properties": { "title": { "$ref": "#/$defs/title" }, "premise": { "$ref": "#/$defs/text" }, "reason": { "$ref": "#/$defs/text" }, "sourceIds": { "$ref": "#/$defs/ids" } } }
+    },
+    "unknowns": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "$ref": "#/$defs/text" } }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "ids": { "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+    "title": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S" },
+    "text": { "type": "string", "minLength": 1, "maxLength": 2000, "pattern": "\\S" },
+    "quote": { "type": "string", "minLength": 1, "maxLength": 1200, "pattern": "\\S" },
+    "optionalText": { "type": ["string", "null"], "minLength": 1, "maxLength": 500, "pattern": "\\S" }
+  }
+}

@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { hash, safePath } from './files.js';
+import { hash, positiveInteger, safePath } from './files.js';
 import { proseChunks, terms } from './memory.js';
 import type { SearchHit } from './memory.js';
 import type { AdoptedContract, ChapterDelta, ChapterReview, ContextPackage, GraphSnapshot, Revision, WorkItem, WorkPolicy } from './types.js';
@@ -128,6 +128,24 @@ export class Store {
   }
   history(chapter: number): { id: number; chapter: number; bodyHash: string; acceptedAt: string }[] {
     return this.db.prepare('SELECT id, chapter, body_hash AS bodyHash, accepted_at AS acceptedAt FROM revisions WHERE chapter = ? ORDER BY id').all(chapter) as unknown as { id: number; chapter: number; bodyHash: string; acceptedAt: string }[];
+  }
+  /** Immutable acceptances by this work, including versions superseded by another work. */
+  workRevisions(workId: string): Revision[] {
+    const rows = this.db.prepare('SELECT *, 0 AS stale FROM revisions WHERE work_id = ? ORDER BY id').all(workId) as unknown as RevisionRow[];
+    return rows.map(row => ({ id: row.id, chapter: row.chapter, body: row.body, bodyHash: row.body_hash,
+      delta: JSON.parse(row.delta) as ChapterDelta, review: JSON.parse(row.review) as ChapterReview,
+      context: JSON.parse(row.context) as ContextPackage, workId: row.work_id, acceptedAt: row.accepted_at, stale: false }));
+  }
+  /** A changed historical contract requires reconciliation without deleting accepted prose. */
+  invalidateFrom(chapter: number): number[] {
+    positiveInteger(chapter, 'from');
+    const chapters = (this.db.prepare('SELECT chapter FROM chapters WHERE chapter >= ? ORDER BY chapter').all(chapter) as { chapter: number }[]).map(item => item.chapter);
+    if (chapters.length) {
+      this.db.prepare('UPDATE chapters SET stale = 1 WHERE chapter >= ?').run(chapter);
+      this.clearGraphCache();
+      this.bump();
+    }
+    return chapters;
   }
   cachedGraph(snapshotId: string): GraphSnapshot | undefined {
     const row = this.db.prepare('SELECT content, checksum FROM memory_graph WHERE snapshot_id = ?').get(snapshotId) as { content: string; checksum: string } | undefined;
