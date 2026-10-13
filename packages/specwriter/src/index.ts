@@ -8,6 +8,10 @@ export { stateField, stateValue, criticalClaims, assessRetrieval } from './memor
 export { buildGraph, retrieveGraph, visibleGraph, graphIdentity } from './graphrag.js';
 export { MicrosoftGraphRag, runGraphRag } from './microsoft-graphrag.js';
 export { WriterMemory } from './writer-memory.js';
+export { MemoryLifecycle } from './memory-lifecycle.js';
+export { StoryAudits } from './story-audits.js';
+export type { MemoryCheckStage, MemoryCheckScope, MemoryCheckEvidence, MemoryCheckReport, MemoryCheckVersion, MemoryCheckShown, MemoryPrepareOptions, MemoryQueryer, MemoryCheckSummary } from './memory-lifecycle.js';
+export type { StoryAuditKind, StoryAuditEvidence, StoryAuditClaim, StoryAuditScope, StoryAuditHook, StoryAuditReport, StoryAuditVersion, CompletionReceipt, StoryAuditPrepareOptions } from './story-audits.js';
 export { BookVersions } from './versions.js';
 export { diagnoseModels } from './model-diagnostics.js';
 export { UsageLedger, parseRequestMetrics, usageCost, validatePrices } from './usage.js';

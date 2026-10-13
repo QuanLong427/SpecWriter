@@ -4,7 +4,7 @@
 
 要求 Node.js 24+。Node 24 的 `node:sqlite` 会提示 experimental；当前实现与测试使用 Node 24.14。WriterMemory 默认使用 Microsoft GraphRAG，需要 Python >=3.11,<3.14、GraphRAG 3.3.x 和模型配置。显式 local 模式的检索不调用模型。
 
-v0.10 增加市场调研、拆书与题材方法三个辅助 Skill、带来源和版本的研究库、番茄/起点公开榜单快照和五类原创题材方法。章纲显式选中本书报告及来源，保存研究不自动改 Specs/canon；只有本书已接纳正文进入默认 GraphRAG。引用校验不能证明市场推断或文学质量，仍需 Codex 和作者判断。
+v0.11 增加全流程历史核查、阶段回顾和完结检查两个辅助 Skill，共13个入口。计划、独立审阅、修订影响、回顾与完结保存实际判断及版本；准备材料不算完成，旧完成证明不能复用为当前版本。研究库、公开榜单与五类原创方法保留独立参考边界；只有本书已接纳正文进入默认 GraphRAG，语义与文学质量仍由 Codex 和作者判断。
 
 ## 作者从哪里开始
 
@@ -21,6 +21,8 @@ v0.10 增加市场调研、拆书与题材方法三个辅助 Skill、带来源�
 | 暂停 | `$specwriter 暂停当前工作包，我先审阅。` | 保存暂停，阅读和审阅仍可用 |
 | 换会话 | `$specwriter 从当前目录恢复进度，先说明正式章节、待审稿与过期后文，不继续写。` | 从本地记录恢复任务，作者明确要求恢复后再推进 |
 | 阶段交付 | `$specwriter 回顾并归档开篇工作包，导出当前有效正文并保存Git检查点。先给我下一段计划，不写新章。` | 工作包回顾、TXT/Markdown/HTML、备份与后续计划 |
+| 独立审阅 | `$specwriter 审阅现有第一至第三章的连续性，读正式正文与出处，保存实际判断，不改文或新建修订包。` | 独立历史审阅，不授予修订权限 |
+| 完结检查 | `$specwriter 检查当前全书承诺、结局与未决问题，给我正文依据和报告，先不确认完结。` | 版本绑定检查与待作者决定的问题 |
 
 **第一章未接纳时不能准备第二章。** 连续创作按章进行：章纲与取记忆 → 草稿 → 提取审阅 → verify → 按授权 commit → 下一章。draft 只允许写和审阅，auto 才能接纳；不能先生成全部三章草稿再共用正式记忆。已有明确授权无需每章重复确认，到范围边界停止。
 
@@ -28,10 +30,22 @@ v0.10 增加市场调研、拆书与题材方法三个辅助 Skill、带来源�
 
 旧章重新接纳会让后文记忆需要重审，按授权逐章协调后再导出；过期批注要重新定位。`exports/novel.{txt,md,html}` 只包含连续有效正式章节。启用 version init 后接纳自动备份；单独改设定、批注或归档后 version save。每本书的数据隔离，Python/Ollama/BGE-M3 可以共用。
 
-完整内部步骤见 [创作流程](assets/workflow.md) 和 [阅读协议](assets/reader.md)。当前逐章闭环已经连通；回顾由 Codex 在工作文档中记录，尚未提供独立自动卷回顾、完结检查或无人值守服务。三章固定样例验证流程，不能作为百万字或文学质量保证。
+完整内部步骤见 [创作流程](assets/workflow.md)、[生命周期核查](assets/lifecycle.md) 和 [阅读协议](assets/reader.md)。回顾和完结由 Codex 实际审阅并保存版本绑定报告，不是无人值守服务。固定样例与规则校验不能作为百万字或文学质量保证。
 
 作者通常只用 `$specwriter`，Codex 按目的路由。需要当前市场证据时使用 Codex 实际可用的联网工具；没有工具或页面不可读时说明来源不足，可用作者文件/摘录，不能伪造最新榜单。CLI radar 无额外搜索 API Key，只抓公开榜单快照，不是 Qwen 搜索。内置五类 craft 为原创经验，可混合、定制或拒绝，不要求统一风格或固定爽点数量。流程可为“研究 → 作者选定 → Specs 采用 → 章纲 references → 写作/审阅”，普通构思无需强制调研。详见 [研究协议](assets/research.md)。
 
+
+## v0.11：计划、审阅、修订、回顾与完结的历史核查
+
+`memory check prepare/show/save/list/status` 管理 plan/review/impact/recap/finish 任务。CLI propose 自动准备 plan-<work>，旧章另准备 impact-<work>；当前草稿审阅使用 review-<work>-<chapter>。Codex 实际读原文、填写核查判断并 save，确认 completed/fresh；prepared 只表示资料已准备，uncertain/conflicting 可保存但不满足工作包推进。
+
+当前章 review 默认验证并复用有效 context 与原 receipt，不额外查询；新疑点用 --retrieve 或显式问题触发检索。无 work 的独立 review 可选已接纳 chapter 或 from/to，读取到 to、执行一轮查询，不创建修订包或参与 work 门禁。其他新阶段非空历史默认把问题合并为一轮查询，同任务与 Provider 缓存可复用；新书空历史完全不调用 GraphRAG。不同阶段/问题不保证缓存命中，不能宣称全流程零模型。
+
+context 只纳入 plan 核查；review/impact 独立保存，后文影响不能成为目标章写作事实或角色已知。旧工作包没有任务保持兼容，已创建 pending/失效任务须实际处理；计划输出不因为刚写出的计划自行使其输入核查失效。
+
+`recap prepare/show/save/list` 保存已接纳范围的阶段回顾，`finish prepare/show/save/list/accept/status` 检查当前全书与记录作者确认。两类 prepare 自动准备同 ID 历史任务：先实际完成 memory check，再审阅阶段报告。开放承诺逐项记录，finish 的 author-retained 必须有真实作者选择；未解决 blocking 或 needs-resolution 保留草案。unknowns 与风格建议可以保留，不强制所有伏笔或文风统一闭合。
+
+finish save 是报告，只有真实作者当前版本完结指令才 accept。完成证明绑定正文、报告与相关输入，变化后动态失效但保留历史；没有自动接纳草稿、改 canon 或授予续写权限。同 ID 范围不可改，--refresh 重检同范围；追加新章扩大全书范围后用新的 finish ID。字段与实际步骤见 [生命周期协议](assets/lifecycle.md)。
 
 ## v0.9：保存作者指示与批注落实
 
@@ -55,7 +69,7 @@ applied 是特定工作包和修订的历史证明，不是对所有未来改稿
 
 ## v0.8：把创作任务和记忆接起来
 
-总入口 `$specwriter` 按作者意图协调十个专项 Skills，共11个；市场调研、拆书和题材方法是可选的前期或修订能力。新书默认 structured 工作流：先采用四份创作约定，再记录工作范围和接纳模式，完成结构化章纲后 prepare。完整步骤见 [创作流程](assets/workflow.md)。
+自 v0.8 接通任务与记忆后，当前总入口 `$specwriter` 按作者意图协调十二个专项 Skills，共13个；市场调研、拆书、题材方法、阶段回顾与完结按实际需要调用。新书默认 structured 工作流：先采用四份创作约定，再记录工作范围和接纳模式，完成结构化章纲及对应历史核查后 prepare。完整步骤见 [创作流程](assets/workflow.md)。
 
 `contract adopt` 将 Spec 快照保存在本书 SQLite 中，按章节选版本。改草稿 Spec 不会改变已采用约定；再次采用会使未完成上下文失效，不修改已接纳正文。`intent seed/save` 管理 intent.json 和生成的 intent.md。章纲绑定目标、场景、人物、POV、故事时间、必选状态/资源/事件/伏笔和揭露边界；未来计划不会入库。
 
@@ -65,7 +79,7 @@ applied 是特定工作包和修订的历史证明，不是对所有未来改稿
 
 旧书缺少 workflow 配置时保留旧流程，重新 init 更新未改动的 Skills；选择新流程后采用一次 contract。迁移不自动补写旧正文的稳定实体和事实，依赖缺失时须核对。API 的 legacy 选项仅用于旧流程和固定测试，不作为默认新书模式。
 
-本轮验证包括协议回归和三章原创短篇流程演练；没有做付费 Qwen 建库、独立文学盲评或百万字验证。卷回顾、完结和更深入的记忆优化依后续阶段实施，源码仓库的 docs/v0.8-workflow-validation.md 保存详细验证范围。
+v0.8 验证包括协议回归和三章原创短篇流程演练，没有做付费 Qwen 建库、独立文学盲评或百万字验证；当时未实现卷回顾与完结。源码仓库的 docs/v0.8-workflow-validation.md 保存该阶段详细范围。
 
 ## v0.7：模型诊断、备份状态和用量限制
 
@@ -139,9 +153,11 @@ node packages/specwriter/dist/cli.js init E:\novels\my-book --name "我的小说
 | `$specwriter-review` | 连续性、约定和阅读体验审阅 |
 | `$specwriter-revise` | 当前草稿或旧章修订及影响分析 |
 | `$specwriter-commit` | 接纳正文与长期记忆 |
+| `$specwriter-recap` | 有正文出处与版本的阶段/卷回顾 |
+| `$specwriter-finish` | 全书完结检查与按真实作者指令记录完成 |
 | `$specwriter-archive` | 工作包完成回顾与归档 |
 
-共11个 Skills，通常无需分别调用。例如：`$specwriter 先调研和分析材料，给我修仙悬疑的原创方案，不写正文`；作者选定后采用四份 Spec 和开篇计划，再写第一章并按授权接纳。斜杠命令 `/sw:*` 尚未实现；Codex 集成使用 Skills。
+共13个 Skills，通常无需分别调用。例如：`$specwriter 先调研和分析材料，给我修仙悬疑的原创方案，不写正文`；作者选定后采用四份 Spec 和开篇计划，再写第一章并按授权接纳，阶段末回顾，全书末检查。斜杠命令 `/sw:*` 尚未实现；Codex 集成使用 Skills。
 
 ## CLI 及文档
 
@@ -152,6 +168,8 @@ node .specwriter/bin/specwriter.mjs resume --json
 # Codex 按作者选择完善四份 Spec 后：
 node .specwriter/bin/specwriter.mjs contract adopt --reason "作者已采用当前设定"
 node .specwriter/bin/specwriter.mjs propose opening --title "开篇三章" --from 1 --to 3
+# Codex 读取自动准备的历史任务，实际填写返回 draftPath 后：
+node .specwriter/bin/specwriter.mjs memory check save plan-opening
 node .specwriter/bin/specwriter.mjs work authorize opening --from 1 --to 3 --acceptance draft --reason "作者要求先审阅草稿"
 node .specwriter/bin/specwriter.mjs intent seed 1 --work opening
 # Codex 填写返回的 intent.json 后：
@@ -159,9 +177,11 @@ node .specwriter/bin/specwriter.mjs intent save 1 --work opening
 node .specwriter/bin/specwriter.mjs prepare 1 --work opening
 ```
 
-prepare 返回 intent、context、draft、delta、review 路径。新书 Codex 改章纲后先 intent save，再 `prepare 1 --work opening --refresh`，再完成正文、事实提取和审阅；`hash 1 --work opening` 提供正文、上下文和 intentHash。版本 2 契约要求证据 basis 和证据/遗漏/连续性三项有依据的审阅检查，修改章纲也会使旧候选失效。作者授权 auto 模式后才能接纳。随后：
+prepare 返回 intent、context、draft、delta、review 路径，不直接生成小说。新书 Codex 改章纲后先 intent save，再 `prepare 1 --work opening --refresh`，再完成正文、事实提取、review 生命周期核查和实际章审阅；`hash 1 --work opening` 提供正文、上下文和 intentHash。版本 2 契约要求证据 basis 和证据/遗漏/连续性三项有依据的审阅检查，修改章纲也会使旧候选失效。作者授权 auto 模式后才能接纳。随后：
 
 新准备的上下文要求 Codex 在提取后运行 `review-requirements N --work ID`，逐项填写 critical_checks 的当前声明哈希、精确证据、判定和说明。位置、生死、境界、真实身份只能保留一个当前世界值；变更必须用 state_changes 匹配旧值。显式“以为/听说/梦见”不能仅靠 established 标签确立真相。检索 assessment 会报告缺失/未解析引用和已识别的状态/余额冲突；未通过的回答不进入续写素材，审阅需回到正式记忆和原文填写 retrieval_check。引用可定位仍不代表推断成立。
+
+有生命周期任务时，先实际完成核查并 memory check save，再重新取得 review-requirements 的 memoryChecks/memoryCheckBindings，将当前实际 id/stage/revision 写入 review.memory_checks 后完成章审阅。核查结论更新产生新版本须重审，不能只换绑定让旧审阅使用新包；作者无需手填这些内部字段。
 
 ```powershell
 # 仅在作者已审阅并明确要求接纳第一章后执行：
@@ -175,6 +195,25 @@ node .specwriter/bin/specwriter.mjs doctor
 ```
 
 CLI 默认输出 JSON；`--json` 还会将错误格式化为 JSON（写到 stderr）。详情见 `--help`。进度可从项目子目录恢复，或显式传 `--root`。
+
+### 历史核查、回顾与完结命令
+
+| 命令 | 职责 |
+| --- | --- |
+| `memory check prepare ID --stage STAGE` | 准备 plan/review/impact/recap/finish 核查材料；并非完成判断 |
+| `memory check show ID [--draft]` | 读取已保存核查或可编辑模板 |
+| `memory check save ID` | 校验实际逐题判断并保存版本；检查 completed/fresh |
+| `memory check list`、`memory check status ID` | 查看任务与待处理/失效原因 |
+| `recap prepare ID --from N --to N` | 准备已接纳段的回顾与同ID历史任务 |
+| `recap show ID [--draft]`、`recap save ID`、`recap list` | 阅读、实际审阅后保存及列出回顾 |
+| `finish prepare ID` | 准备当前全有效正文的检查与同ID历史任务 |
+| `finish show ID [--draft]`、`finish save ID`、`finish list` | 阅读、实际审阅后保存及列出全书检查 |
+| `finish accept ID --reason TEXT` | 依真实作者完结指令记录当前完成证明 |
+| `finish status` | 查看 unfinished/completed/invalidated 及原因、历史证明 |
+
+memory check prepare 的范围用 `--work ID --chapter N --from N --to N` 按阶段选择；无work的独立 review 只选已接纳 chapter 或明确 from/to，不新建修订包。有work review默认复用有效章context，新问题用 --retrieve 或显式问题才查询。prepare 可用 --question TEXT 或 --questions-file UTF8字符串数组，以及 --refresh；recap/finish prepare也支持问题和refresh，但自动准备同ID历史任务，不重复调用。
+
+按返回 draftPath 编辑实际模板，保留机器字段，读原文并保存判断。同ID stage/scope不能改，refresh重检同范围；扩大回顾范围或追加新章后检查全书用新ID。report/receipt不修改canon或代替授权，完整字段与步骤见 [生命周期协议](assets/lifecycle.md)。
 
 ### 研究库与题材方法命令
 
@@ -205,6 +244,9 @@ radar 默认每组最多15条，limit为每组1–50，timeout为每请求含正
 | `specwriter/specs/*.md` | premise、world、characters、style 创作约定 |
 | `specwriter/plans/` | 全书方向、滚动卷计划 |
 | `specwriter/research/<id>/` | draft.json、sources/ 捕获来源、versions/ 已保存报告和 current.json |
+| `specwriter/memory/tasks/<id>/` | 生命周期请求、准备材料、核查 draft 与不可变完成记录 |
+| `specwriter/story-audits/<id>/` | 阶段回顾/完结报告草案、准备和版本 |
+| `specwriter/completion/` | 当前及历史完结证明，动态检查是否仍有效 |
 | `specwriter/work/<id>/` | proposal、自动 tasks 和章节 intent/context/delta/review |
 | `manuscript/drafts/` | 未接纳草稿和导入稿 |
 | `manuscript/chapters/` | 已接纳正文的投影 |

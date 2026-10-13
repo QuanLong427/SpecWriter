@@ -275,7 +275,8 @@ export class BookVersions {
       rmSync(safePath(restored, '.specwriter/backup'), { recursive: true, force: true });
       initProject(restored, config.name);
       const check = new Project(restored);
-      try { const health = check.doctor(); if (!health.healthy) throw new Error('Restored novel failed consistency checks'); }
+      let warnings: string[];
+      try { const health = check.doctor(); if (!health.healthy) throw new Error('Restored novel failed consistency checks'); warnings = health.warnings; }
       finally { check.close(); }
       const restoredRepo = safePath(restored, '.specwriter/version/repository.git'); mkdirSync(dirname(restoredRepo), { recursive: true });
       this.git(['clone', '--mirror', '--no-local', source, restoredRepo], { repo: restoredRepo });
@@ -297,7 +298,7 @@ export class BookVersions {
       // Publish only a fully validated book with a complete, independent Git history.
       if (existsSync(target)) throw new Error('Restore target appeared during recovery; refusing overwrite');
       renameSync(publish, target); publish = undefined;
-      return { root: target, commit, generation: manifest.generation, runtime: manifest.runtime, needsModelSetup: config.memory?.backend === 'microsoft-graphrag', note: 'Original novel preserved. Configure model credentials locally; GraphRAG indexes rebuild on demand.' };
+      return { root: target, commit, generation: manifest.generation, runtime: manifest.runtime, warnings, needsModelSetup: config.memory?.backend === 'microsoft-graphrag', note: 'Original novel preserved. Inspect returned warnings; recovery does not certify audit or completion status. Configure model credentials locally; GraphRAG indexes rebuild on demand.' };
     } finally {
       if (publish) rmSync(publish, { recursive: true, force: true });
       rmSync(temp, { recursive: true, force: true });

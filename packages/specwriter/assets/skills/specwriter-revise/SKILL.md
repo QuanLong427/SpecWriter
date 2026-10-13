@@ -16,3 +16,5 @@ description: 按作者意见修订 SpecWriter 小说草稿或历史章节，并�
 applied 仅证明该修订版本中的落实。作者要求未来所有修订继续遵守时，另存书籍 instruction 或采用 Specs，不把局部批注自动扩大成永久约定。
 
 作者按研究或题材方法要求修改时，按 [研究协议](references/research.md) 先核对已选做法和目标范围；参考报告不自动授权改设定或重写后文。明确选择的长期约束另入 Specs/instruction，章内参考入 intent.references；资料变化后重新 save/refresh。拆书只迁移机制，不复制外部名字、表达或标志性情节；建议须适配已有文风。
+
+按 [生命周期核查](references/lifecycle.md) 完成 plan 与旧章 impact 核查。propose 自动准备的任务先读出处、实际填写并 save，不用 prepared 代替影响判断；已有完整有效资料复用，有缺口才查询。impact 后文审计与目标章 prepare/context 分开，后文不能当目标章已发生历史或人物已知。改稿后重新完成绑定当前草稿的 review 核查，版本变化不沿用旧完成证明；影响报告不授权重写全部后文。

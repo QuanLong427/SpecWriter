@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "bookId", "kind", "preparedRevision", "taskId", "taskPreparedRevision", "taskRevision", "inputFingerprint", "scope", "hookInventory", "summary", "characterChanges", "mainlineChanges", "hookDecisions", "findings", "unknowns", "reviewed", "reviewNotes"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": { "$ref": "#/definitions/id" },
+    "bookId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "kind": { "enum": ["recap", "finish"] },
+    "preparedRevision": { "$ref": "#/definitions/hash" },
+    "taskId": { "$ref": "#/definitions/id" },
+    "taskPreparedRevision": { "$ref": "#/definitions/hash" },
+    "taskRevision": { "anyOf": [{ "$ref": "#/definitions/hash" }, { "type": "null" }] },
+    "inputFingerprint": { "$ref": "#/definitions/hash" },
+    "scope": {
+      "type": "object", "additionalProperties": false, "required": ["from", "to", "chapters"],
+      "properties": {
+        "from": { "type": "integer", "minimum": 1 }, "to": { "type": "integer", "minimum": 1 },
+        "chapters": { "type": "array", "minItems": 1, "maxItems": 10000, "items": {
+          "type": "object", "additionalProperties": false, "required": ["chapter", "revision", "bodyHash"],
+          "properties": { "chapter": { "type": "integer", "minimum": 1 }, "revision": { "type": "integer", "minimum": 1 }, "bodyHash": { "$ref": "#/definitions/hash" } }
+        } }
+      }
+    },
+    "hookInventory": { "type": "array", "maxItems": 5000, "items": {
+      "type": "object", "additionalProperties": false, "required": ["id", "description", "status", "sourceChapter", "sourceRevision", "evidence"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 }, "description": { "type": "string", "minLength": 1, "maxLength": 10000 },
+        "status": { "enum": ["open", "progressing", "deferred"] }, "sourceChapter": { "type": "integer", "minimum": 1 }, "sourceRevision": { "type": "integer", "minimum": 1 },
+        "evidence": { "$ref": "#/definitions/evidence" }
+      }
+    } },
+    "summary": { "$ref": "#/definitions/claim" },
+    "characterChanges": { "type": "array", "maxItems": 200, "items": { "$ref": "#/definitions/claim" } },
+    "mainlineChanges": { "type": "array", "maxItems": 200, "items": { "$ref": "#/definitions/claim" } },
+    "hookDecisions": { "type": "array", "maxItems": 5000, "items": {
+      "type": "object", "additionalProperties": false, "required": ["hookId", "disposition", "reason", "authorReason", "evidence"],
+      "properties": {
+        "hookId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "disposition": { "enum": ["deferred", "author-retained", "needs-resolution"] },
+        "reason": { "type": "string", "maxLength": 10000 }, "authorReason": { "type": ["string", "null"], "maxLength": 10000 },
+        "evidence": { "$ref": "#/definitions/evidenceList" }
+      }
+    } },
+    "findings": { "type": "array", "maxItems": 200, "items": {
+      "type": "object", "additionalProperties": false, "required": ["id", "severity", "description", "resolved", "resolution", "evidence"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" }, "severity": { "enum": ["blocking", "warning", "suggestion"] },
+        "description": { "type": "string", "minLength": 1, "maxLength": 10000 }, "resolved": { "type": "boolean" },
+        "resolution": { "type": ["string", "null"], "maxLength": 10000 }, "evidence": { "$ref": "#/definitions/evidenceList" }
+      }
+    } },
+    "unknowns": { "type": "array", "maxItems": 100, "items": { "type": "string", "minLength": 1, "maxLength": 5000 } },
+    "reviewed": { "type": "boolean" },
+    "reviewNotes": { "type": "array", "maxItems": 100, "items": { "type": "string", "minLength": 1, "maxLength": 5000 } }
+  },
+  "definitions": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "evidence": {
+      "type": "object", "additionalProperties": false, "required": ["chapter", "revision", "quote"],
+      "properties": {
+        "chapter": { "type": "integer", "minimum": 1 }, "revision": { "type": "integer", "minimum": 1 },
+        "quote": { "type": "string", "minLength": 1, "maxLength": 10000 },
+        "start": { "type": "integer", "minimum": 0 }, "end": { "type": "integer", "minimum": 1 }
+      },
+      "dependencies": { "start": ["end"], "end": ["start"] }
+    },
+    "evidenceList": { "type": "array", "maxItems": 64, "items": { "$ref": "#/definitions/evidence" } },
+    "claim": {
+      "type": "object", "additionalProperties": false, "required": ["text", "evidence"],
+      "properties": { "text": { "type": "string", "maxLength": 10000 }, "evidence": { "$ref": "#/definitions/evidenceList" } }
+    }
+  }
+}

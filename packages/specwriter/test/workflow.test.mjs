@@ -38,7 +38,7 @@ test('init preserves author files and modified skills on repeated installation',
   t.after(() => rmSync(root, { recursive: true, force: true }));
   writeFileSync(join(root, 'AGENTS.md'), '# Existing project rules\n');
   const result = initProject(root, '我的小说');
-  assert.equal(result.skills.length, 11);
+  assert.equal(result.skills.length, 13);
   const skill = join(root, '.agents/skills/specwriter-write/SKILL.md');
   writeFileSync(skill, 'custom author skill');
   const premise = join(root, 'specwriter/specs/premise.md');
@@ -297,7 +297,7 @@ test('CLI and generated launcher accept paths with spaces and report machine-rea
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const init = spawnSync(process.execPath, [cli, 'init', root, '--name', 'CLI 小说', '--json'], { encoding: 'utf8' });
   assert.equal(init.status, 0, init.stderr);
-  assert.equal(JSON.parse(init.stdout).skills.length, 11);
+  assert.equal(JSON.parse(init.stdout).skills.length, 13);
   const launcher = join(root, '.specwriter/bin/specwriter.mjs');
   const result = spawnSync(process.execPath, [launcher, 'status', '--json'], { cwd: root, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);

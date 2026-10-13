@@ -1,7 +1,7 @@
 {
   "name": "specwriter-workspace",
   "private": true,
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Spec-driven long-form fiction with Codex and WriterMemory",
   "license": "MIT",
   "workspaces": ["packages/specwriter"],

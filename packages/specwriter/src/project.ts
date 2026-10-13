@@ -17,6 +17,8 @@ import { workProgress } from './work-progress.js';
 import { AuthorInstructions, guidanceChecks, type AuthorGuidance } from './author-guidance.js';
 import { NovelReader } from './reader.js';
 import { ResearchLibrary } from './research.js';
+import { MemoryLifecycle } from './memory-lifecycle.js';
+import { StoryAudits } from './story-audits.js';
 import type { ChapterDelta, ChapterReview, ContextPackage, ContextSource, MemoryState, Revision, WorkItem } from './types.js';
 
 export class Project {
@@ -25,6 +27,8 @@ export class Project {
   readonly workflow: StoryWorkflow;
   readonly instructions: AuthorInstructions;
   readonly research: ResearchLibrary;
+  readonly lifecycle: MemoryLifecycle;
+  readonly audits: StoryAudits;
   constructor(root: string) {
     this.root = resolve(root);
     loadConfig(this.root);
@@ -32,6 +36,8 @@ export class Project {
     this.workflow = new StoryWorkflow(this.root, this.store, work => this.progress(work));
     this.instructions = new AuthorInstructions(this.root, this.store);
     this.research = new ResearchLibrary(this.root);
+    this.lifecycle = new MemoryLifecycle(this);
+    this.audits = new StoryAudits(this);
     try { this.instructions.reconcile(); }
     catch (error) { this.store.close(); throw error; }
   }
@@ -87,6 +93,7 @@ export class Project {
         sources.push({ id: path, kind: 'plan', source: path, content, hash: hash(content), reason: '章纲选中的当前计划；不是正式事实', protection: 'compressible' });
       }
       sources.push(...this.research.contextSources(intent.references ?? []));
+      sources.push(...this.lifecycle.contextSources(workId, chapter));
       const proposal = `specwriter/work/${workId}/proposal.md`, content = readFileSync(this.path(proposal), 'utf8');
       sources.push({ id: proposal, kind: 'proposal', source: proposal, content, hash: hash(content), reason: '本轮作者意图', protection: 'protected' });
       sources.push({ id: source, kind: 'intent', source, content: markdown, hash: hash(markdown), reason: '已校验的本章目标、依赖与认知边界', protection: 'protected' });
@@ -112,6 +119,7 @@ export class Project {
       const source = this.chapterPaths(workId, chapter).intent;
       const content = readFileSync(this.path(source), 'utf8');
       sources.push({ id: source, kind: 'intent', source, reason: '当前章纲与信息边界；变化后须刷新上下文并重新审阅', content, hash: hash(content), protection: 'protected' });
+      sources.push(...this.lifecycle.contextSources(workId, chapter));
     }
     return sources;
   }
@@ -185,6 +193,12 @@ export class Project {
     let research: { reports: ReturnType<ResearchLibrary['list']>; error: string | null };
     try { research = { reports: this.research.list(), error: null }; }
     catch (error) { research = { reports: [], error: (error as Error).message }; }
+    let memoryChecks: { tasks: ReturnType<MemoryLifecycle['list']>; error: string | null };
+    try { memoryChecks = { tasks: this.lifecycle.list(), error: null }; }
+    catch (error) { memoryChecks = { tasks: [], error: (error as Error).message }; }
+    let storyAudits: { value: ReturnType<StoryAudits['status']> | null; error: string | null };
+    try { storyAudits = { value: this.audits.status(), error: null }; }
+    catch (error) { storyAudits = { value: null, error: (error as Error).message }; }
     const progressByWork = new Map(works.map(work => [work.id, this.progress(work, revisions)]));
     const pending = works.filter(work => work.status === 'active').flatMap(work => {
       const result: { workId: string; chapter: number; stage: string; needsRefresh: boolean }[] = [];
@@ -213,6 +227,7 @@ export class Project {
       works, pending, workProgress: works.map(work => ({ workId: work.id, chapters: progressByWork.get(work.id)! })),
       authorInstructions: this.instructions.list(),
       research,
+      memoryChecks, storyAudits,
       authorFeedback: new NovelReader(this).feedback().filter(item => item.status === 'open').map(item => ({ id: item.id, chapter: item.chapter, blocking: item.blocking ?? false, decision: item.decision ?? null })),
       workflow: { mode: this.workflow.structured ? 'structured' : 'legacy', contracts: this.store.contracts().map(item => ({ id: item.id, fromChapter: item.fromChapter })), policies: works.map(work => this.store.policy(work.id)).filter(Boolean) },
       nextAction: dirty.length ? 'sync; modified prose requires sync --capture' : trusted.length < revisions.length ? `reconcile chapter ${trusted.length + 1}` : `prepare chapter ${trusted.length + 1}`
@@ -227,7 +242,10 @@ export class Project {
       chapter: null as number | null, stage: 'select-work', paths: null as Record<string, string> | null, nextAction: '', detail: '' };
     if (status.dirtyFiles.length) return { ...result, stage: 'sync', nextAction: 'sync --capture', detail: 'Preserve modified accepted prose before recovering the writing task.' };
     if (status.projectionNeedsSync) return { ...result, stage: 'sync', nextAction: 'sync', detail: 'Rebuild readable projections before advancing.' };
-    if (!work) return { ...result, nextAction: active.length ? 'resume --work ID' : 'propose ID --title TITLE --from N --to N', detail: active.length ? 'Select the intended active work; no task was chosen automatically.' : 'Choose a new scope from the author instruction.' };
+    if (!work) {
+      if (!active.length && status.storyAudits.value?.completed) return { ...result, stage: 'finished', nextAction: 'export --format html', detail: 'The author accepted a fresh whole-book completion audit. Export or start new work only on author instruction.' };
+      return { ...result, nextAction: active.length ? 'resume --work ID' : 'propose ID --title TITLE --from N --to N', detail: active.length ? 'Select the intended active work; no task was chosen automatically.' : 'Choose a new scope from the author instruction.' };
+    }
     const reader = new NovelReader(this);
     const unreconciled = reader.feedback().find(item => item.decision?.decision === 'adopt' && item.decision.targetWorkId === work.id && !item.applied &&
       this.store.revisions().some(revision => !revision.stale && revision.chapter === item.chapter && revision.workId === work.id &&
@@ -252,6 +270,8 @@ export class Project {
       const policy = result.policy;
       if (policy?.paused) return { ...result, stage: 'paused', nextAction: `work resume ${work.id} --reason AUTHOR_INSTRUCTION`, detail: `Paused: ${policy.pauseReason}; review is available, advancement requires author instruction.` };
       if (!policy || chapter < policy.fromChapter || chapter > policy.toChapter) return { ...result, stage: 'authorize', nextAction: `work authorize ${work.id} --from ${chapter} --to ${work.toChapter} --acceptance draft --reason AUTHOR_INSTRUCTION`, detail: 'Record the actual author scope and acceptance mode; do not invent authorization.' };
+      try { this.lifecycle.guard(work.id, chapter, 'prepare'); }
+      catch (error) { return { ...result, stage: 'memory-check', nextAction: 'memory check list', detail: (error as Error).message }; }
       try { this.workflow.readIntent(chapter, work.id); this.inputSources(work.id, chapter); }
       catch (error) { return { ...result, stage: 'intent', nextAction: existsSync(this.path(result.paths.intentData!)) ? `intent save ${chapter} --work ${work.id}` : `intent seed ${chapter} --work ${work.id}`, detail: (error as Error).message }; }
     }
@@ -268,6 +288,8 @@ export class Project {
       const hashes = this.hashes(chapter, work.id);
       if (delta.contextHash !== hashes.contextHash || delta.draftHash !== hashes.draftHash || delta.intentHash !== hashes.intentHash) throw new Error('Extraction hashes are outdated');
     } catch (error) { return { ...result, stage: 'extract', nextAction: '$specwriter-write', detail: (error as Error).message }; }
+    try { this.lifecycle.guard(work.id, chapter, 'review'); }
+    catch (error) { return { ...result, stage: 'memory-check', nextAction: 'memory check list', detail: (error as Error).message }; }
     try { this.verified(chapter, work.id); }
     catch (error) { return { ...result, stage: 'review', nextAction: '$specwriter-review', detail: (error as Error).message }; }
     if (this.workflow.structured && result.policy?.acceptance !== 'auto') return { ...result, stage: 'await-acceptance', nextAction: '$specwriter-commit', detail: 'Reviewed draft is ready for author inspection. Record explicit acceptance before commit.' };
@@ -283,6 +305,7 @@ export class Project {
       positiveInteger(options.budget ?? config.contextBudgetChars, 'budget');
       this.workflow.assertAdvance(chapter, workId);
       new NovelReader(this).assertFeedbackAdvance(chapter, workId);
+      this.lifecycle.guard(workId, chapter, 'prepare');
       const intent = this.workflow.structured ? this.workflow.readIntent(chapter, workId) : undefined;
       if (intent) requiredMemory(replay(revisions, chapter - 1), intent);
       const query = options.query?.trim() || (intent ? intentQuery(intent) : config.memory!.backend === 'microsoft-graphrag' ? defaultMemoryQuery : '');
@@ -414,9 +437,22 @@ export class Project {
     return context;
   }
   prepare(chapter: number, workId: string, options: { query?: string; budget?: number; refresh?: boolean; expectedToken?: string } = {}) {
-    return this.store.transaction(() => this.prepareArtifacts(chapter, workId, options));
+    const prepare = () => this.prepareArtifacts(chapter, workId, options);
+    return this.store.db.isTransaction ? prepare() : this.store.transaction(prepare);
+  }
+  /** Validate cached material without advancing work, mutating drafts or calling models. */
+  readPreparedContext(chapter: number, workId: string): ContextPackage {
+    const read = () => {
+      this.assertWork(workId, chapter); this.assertClean();
+      const context = readJson<ContextPackage>(this.path(this.chapterPaths(workId, chapter).context));
+      const expected = this.buildContext(chapter, workId, context.query, context.budgetChars);
+      if (context.chapter !== chapter || context.workId !== workId || context.contextHash !== expected.contextHash || hash(json({ ...context, contextHash: '' })) !== context.contextHash) throw new Error('Prepared context is stale or modified; refresh before using it');
+      return context;
+    };
+    return this.store.db.isTransaction ? read() : this.store.transaction(read);
   }
   private prepareArtifacts(chapter: number, workId: string, options: { query?: string; budget?: number; refresh?: boolean; expectedToken?: string }) {
+    this.lifecycle.guard(workId, chapter, 'prepare');
     this.assertWork(workId, chapter); this.assertClean();
     this.workflow.assertAdvance(chapter, workId);
     new NovelReader(this).assertFeedbackAdvance(chapter, workId);
@@ -457,6 +493,9 @@ export class Project {
     const context = readJson<ContextPackage>(this.path(paths.context));
     return { chapter, baseRevision: context.baseRevision, contextHash: context.contextHash, intentHash: hash(readFileSync(this.path(paths.intent), 'utf8')), draftHash: hash(readFileSync(this.path(paths.draft), 'utf8')) };
   }
+  private memoryCheckTasks(chapter: number, workId: string) {
+    return this.lifecycle.list().filter(task => ['plan', 'review', 'impact'].includes(task.stage) && task.scope.workId === workId && task.scope.from <= chapter && task.scope.to >= chapter);
+  }
   reviewRequirements(chapter: number, workId: string) {
     this.assertWork(workId, chapter);
     const paths = this.chapterPaths(workId, chapter);
@@ -464,12 +503,15 @@ export class Project {
     validateDelta(delta, readFileSync(this.path(paths.draft), 'utf8'));
     const context = readJson<ContextPackage>(this.path(paths.context));
     return { ...this.hashes(chapter, workId), criticalClaims: criticalClaims(delta), retrievalAssessment: context.retrieval?.assessment ?? null,
-      intentChecks: [...(context.workflow ? intentChecks(context.workflow.intent) : []), ...guidanceChecks(context.authorGuidance)] };
+      intentChecks: [...(context.workflow ? intentChecks(context.workflow.intent) : []), ...guidanceChecks(context.authorGuidance)],
+      memoryChecks: this.memoryCheckTasks(chapter, workId),
+      memoryCheckBindings: this.memoryCheckTasks(chapter, workId).filter(task => task.ready && task.revision !== null).map(task => ({ id: task.id, stage: task.stage as 'plan' | 'review' | 'impact', revision: task.revision! })) };
   }
   private verified(chapter: number, workId: string) {
     const paths = this.chapterPaths(workId, chapter);
     this.assertWork(workId, chapter); this.assertClean();
     new NovelReader(this).assertFeedbackAdvance(chapter, workId);
+    this.lifecycle.guard(workId, chapter, 'review');
     const context = readJson<ContextPackage>(this.path(paths.context));
     const expected = this.buildContext(chapter, workId, context.query, context.budgetChars);
     if (context.contextHash !== expected.contextHash || hash(json({ ...context, contextHash: '' })) !== context.contextHash) throw new Error('Context is stale or modified; prepare --refresh and re-extract/review');
@@ -478,6 +520,11 @@ export class Project {
     const delta: unknown = readJson(this.path(paths.delta));
     const review: unknown = readJson(this.path(paths.review));
     validateDelta(delta, body); validateReview(review);
+    const tasks = this.memoryCheckTasks(chapter, workId);
+    if (tasks.some(task => !task.ready || task.revision === null)) throw new Error('Memory check tasks must be completed and fresh before chapter review can pass');
+    const bindings = tasks.map(task => ({ id: task.id, stage: task.stage, revision: task.revision })).sort((a, b) => a.id.localeCompare(b.id));
+    const recordedBindings = (review.memory_checks ?? []).map(({ id, stage, revision }) => ({ id, stage, revision })).sort((a, b) => a.id.localeCompare(b.id));
+    if (json(bindings) !== json(recordedBindings)) throw new Error('Chapter review must bind the current recorded memory check revisions; run review-requirements again');
     if (context.workflow || context.authorGuidance) {
       const expectedChecks = [...(context.workflow ? intentChecks(context.workflow.intent) : []), ...guidanceChecks(context.authorGuidance)], checks = review.intent_checks ?? [];
       const ids = new Set(checks.map(item => item.id));
@@ -513,6 +560,7 @@ export class Project {
   commit(chapter: number, workId: string) {
     const accepted = this.store.transaction(() => {
       this.workflow.assertAdvance(chapter, workId, true);
+      this.lifecycle.guard(workId, chapter, 'commit');
       const input = this.verified(chapter, workId);
       if (input.context.workflow) for (const item of input.context.workflow.intent.newEntities.filter(entity => {
         const intent = input.context.workflow!.intent;
@@ -663,6 +711,8 @@ export class Project {
     if (status.staleChapters.length) warnings.push(`Memory reconciliation required for chapters ${status.staleChapters.join(', ')}`);
     if (status.projectionNeedsSync) warnings.push('Readable projections need sync');
     if (status.research.error) warnings.push(`Research references need inspection: ${status.research.error}`);
+    if (status.memoryChecks.error) warnings.push(`Lifecycle memory checks need inspection: ${status.memoryChecks.error}`);
+    if (status.storyAudits.error) warnings.push(`Story audits need inspection: ${status.storyAudits.error}`);
     if (status.memoryBackend === 'microsoft-graphrag' && !status.graphRagConfigured) warnings.push('Default Microsoft GraphRAG needs provider setup and model credentials before retrieving accepted chapters');
     for (const revision of this.store.revisions()) {
       if (hash(revision.body) !== revision.bodyHash) errors.push(`Stored body hash mismatch: ${revision.chapter}`);

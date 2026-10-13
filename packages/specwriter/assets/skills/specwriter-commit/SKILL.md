@@ -14,3 +14,7 @@ description: 接纳 SpecWriter 小说正文版本，通过校验将正式正文�
 接纳前检查适用指示、采纳批注和反馈门禁，逐项审阅绑定当前资料。接纳后绑定 applied revision；只反馈落实记录失败时正文已接纳，按阅读协议 reconcile 补记，不重复 commit。草稿不标正式落实。
 
 本章含 intent.references 时核对选中报告、来源与当前 context 绑定；变化后 refresh 并实际重审，不只替换哈希。研究和 craft 的保存不等于作者采用，接纳只将本书正文实际确立的内容按证据协议入库；外部资料不会进入默认 GraphRAG。详见 [研究协议](references/research.md)。
+
+按 [生命周期核查](references/lifecycle.md) 核对已创建的 plan/review 任务，旧章另核对 impact，均须完成且 fresh。prepared、仅保存但 completed=false 或旧版本结果不能证明检查通过；遇门禁返回实际任务按原文修正判断，不删除任务或只换哈希。生命周期记录不代替正文证据或作者接纳授权，目标章 context 不含 review/impact。
+
+核对 review.memory_checks 与 review-requirements.memoryCheckBindings 的实际已完成 revision 一致；结论更新后重做章审阅，不能用旧 review 冒用新核查版本。清单仅包含本章有关任务，旧无任务书兼容，不为了通过补造绑定。

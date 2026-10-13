@@ -71,6 +71,7 @@ export interface ChapterReview {
   critical_checks?: { claimHash: string; verdict: 'supported' | 'unsupported' | 'uncertain'; evidenceQuote: string; explanation: string }[];
   intent_checks?: { id: string; verdict: 'satisfied' | 'uncertain' | 'violated'; evidenceQuotes: string[]; explanation: string }[];
   retrieval_check?: { assessmentHash: string; decision: 'use-formal-memory'; notes: string };
+  memory_checks?: { id: string; stage: 'plan' | 'review' | 'impact'; revision: string }[];
 }
 export interface Revision {
   id: number;
@@ -120,7 +121,7 @@ export interface MemoryState {
 }
 export interface ContextSource {
   id: string;
-  kind: 'spec' | 'plan' | 'proposal' | 'intent' | 'prose' | 'retrieval' | 'instruction' | 'feedback' | 'research';
+  kind: 'spec' | 'plan' | 'proposal' | 'intent' | 'prose' | 'retrieval' | 'instruction' | 'feedback' | 'research' | 'memory-check';
   source: string;
   reason: string;
   content: string;

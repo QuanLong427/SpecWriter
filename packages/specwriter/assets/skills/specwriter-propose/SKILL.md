@@ -12,3 +12,5 @@ description: 为 SpecWriter 小说建立创作约定、滚动卷计划或有章�
 将明确正向/禁止要求保存有范围的 instruction，待决探索不升级为指示，授权 reason 不代替创作要求。追溯约定/书籍指示时核对历史影响，按授权顺序协调，不自行扩大修订范围。
 
 采用研究或题材方法时按 [研究协议](references/research.md) 核对本书已保存报告、来源范围和作者选择，区分创作目标、可调整手法与硬约束；保存报告/use profile 不代表已采用全部建议。已选做法先整理 Specs 或有范围的 instruction，再按实际授权 adopt。需要本章参考时在 intent.references 写 id、purpose 和可选 revision，最多8份，不塞入 planPaths；报告与外部作品不进入正式记忆或默认 GraphRAG。
+
+按 [生命周期核查](references/lifecycle.md) 实际完成 plan 核查再交付可执行计划。propose CLI 自动准备 `plan-<work>`，旧章修订另准备 `impact-<work>`；按返回任务恢复，不重复准备制造查询。读资料与原文后填写 findings/reviewNotes 并 memory check save，核对 completed/fresh；prepared 不是完成，uncertain/conflicting 不冒充已核对。空历史不调用 GraphRAG。后文 impact 独立保存，不混入目标章上下文，也不扩大修订授权。

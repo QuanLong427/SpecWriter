@@ -53,7 +53,7 @@ export function initProject(rootPath: string, name = '未命名小说', options:
     writeNew(safePath(root, 'specwriter', 'specs', `${name}.md`), readFileSync(join(assetsRoot, 'templates', `${name}.md`), 'utf8'));
   }
   writeNew(safePath(root, 'specwriter', 'plans', 'outline.md'), readFileSync(join(assetsRoot, 'templates', 'outline.md'), 'utf8'));
-  for (const directory of ['specwriter/plans/volumes', 'specwriter/research', 'specwriter/work', 'specwriter/archive', 'specwriter/memory/views', 'manuscript/drafts', 'manuscript/chapters']) mkdirSync(safePath(root, directory), { recursive: true });
+  for (const directory of ['specwriter/plans/volumes', 'specwriter/research', 'specwriter/work', 'specwriter/archive', 'specwriter/memory/views', 'specwriter/memory/tasks', 'specwriter/story-audits', 'specwriter/completion', 'manuscript/drafts', 'manuscript/chapters']) mkdirSync(safePath(root, directory), { recursive: true });
   const store = new Store(root, true);
   store.close();
 
@@ -90,6 +90,7 @@ export function initProject(rootPath: string, name = '未命名小说', options:
     managed(`${skillPath}/references/versioning.md`, readFileSync(join(assetsRoot, 'versioning.md'), 'utf8'));
     managed(`${skillPath}/references/workflow.md`, readFileSync(join(assetsRoot, 'workflow.md'), 'utf8'));
     managed(`${skillPath}/references/research.md`, readFileSync(join(assetsRoot, 'research.md'), 'utf8'));
+    managed(`${skillPath}/references/lifecycle.md`, readFileSync(join(assetsRoot, 'lifecycle.md'), 'utf8'));
     for (const schema of ['chapter-delta.schema.json', 'review.schema.json', 'chapter-intent.schema.json']) managed(`${skillPath}/references/${schema}`, readFileSync(join(schemasRoot, schema), 'utf8'));
     managed(`${skillPath}/references/THIRD_PARTY_NOTICES.md`, readFileSync(join(packageRoot, 'THIRD_PARTY_NOTICES.md'), 'utf8'));
     managed(`${skillPath}/references/licenses/ainovel-cli-Apache-2.0.txt`, readFileSync(join(packageRoot, 'licenses', 'ainovel-cli-Apache-2.0.txt'), 'utf8'));

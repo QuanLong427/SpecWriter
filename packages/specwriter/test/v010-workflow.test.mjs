@@ -163,7 +163,7 @@ test('recursive skill installation includes auxiliary references and preserves a
   const { project, root } = fixture(t);
   const path = join(root, '.agents/skills/specwriter-research/references/market-evidence.md');
   assert.ok(existsSync(path));
-  assert.equal(initProject(root).skills.length, 11);
+  assert.equal(initProject(root).skills.length, 13);
   writeFileSync(path, '# 作者定制的研究方法');
   const again = initProject(root);
   assert.ok(again.preserved.includes('.agents/skills/specwriter-research/references/market-evidence.md'));

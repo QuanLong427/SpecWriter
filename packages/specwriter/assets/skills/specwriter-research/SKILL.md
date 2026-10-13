@@ -12,3 +12,5 @@ description: 为 SpecWriter 小说查阅近期市场、平台榜单与读者定�
 来源角色也要核对：只有小说片段或 craft 方法时，可以保存文本定位假说的 analysis/craft 报告，不能因 file 引文通过校验就把它当市场取证。缺实际市场材料的 market 报告留 draft；作者提供的榜单、评论或其他市场文件可支持相应范围，仍不冒充已验证当前数据。
 
 交付保存路径、来源范围、判断限制和供作者决定的方向。作者已经选定时由 explore/propose 落实；否则保持研究报告，不自动改 Specs、instruction、canon 或写作授权。只有明确选入章纲 references 的本书已保存报告进入本章资料包，研究文本不进入默认 GraphRAG。
+
+据研究调整本书下一阶段或历史剧情时，先按 [生命周期核查](references/lifecycle.md) 完成 plan，涉及旧章另做 impact；实际读本书出处并保存判断。纯外部市场取证仍用研究库，不把它当本书正式历史。已有有效材料复用，有证据缺口才查；空历史不调用 GraphRAG。

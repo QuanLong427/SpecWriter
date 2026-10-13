@@ -16,3 +16,5 @@ description: 在 SpecWriter 小说项目中继续写章节或执行已确定的�
 开始当前章检查适用 instruction 和反馈门禁，实际读 prepare 返回的 context；它不是模型上下文的强制替换。新要求记录 instruction，采纳批注按阅读协议，变化后 refresh 重审。review-requirements 全部指示/反馈检查须有实际依据，阻塞意见只开放明确目标修订，不越过继续后文。
 
 context 中显式选入的研究报告与来源按 [研究协议](references/research.md) 读取，遵守 intent.references 的 purpose 和本书已采用约定。外部作品只迁移抽象机制，不搬名字、表达或标志性情节；内置 craft 是可定制原创经验，不固定爽点计数或强制统一风格。资料更新后 save/refresh，不绕过来源预算；研究结论不作为人物已知或本书事件证据，默认 GraphRAG 仍只索引本书已接纳正文。
+
+按 [生命周期核查](references/lifecycle.md) 核对本工作包 plan 任务完成且 fresh，再准备目标章；已有 pending/失效任务须实际核查、保存，不能只拿资料包继续。本章写完后用 specwriter-review 创建并完成 `review-<work>-<chapter>` 历史核查，再提取审阅/verify。复用有效证据，有缺口才检索；空历史不调用 GraphRAG。context 只含 plan 核查，review/impact 独立保存，避免循环失效和未来信息污染。

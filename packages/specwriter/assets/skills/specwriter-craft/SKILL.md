@@ -10,3 +10,5 @@ profiles 是项目原创经验，覆盖读者承诺、冲突循环、场景、�
 作者需要保存参考时用 `craft use PROFILE --as REPORT`，读取返回的本书报告与来源。结合本书提出具体可选改法，说明它解决的问题、代价及不适合的情形。作者选定后再整理 Specs 或有范围的 instruction 并按实际授权采用；use 不自动采用约定，也不建立硬性审阅门槛。
 
 写作/审阅使用已选方法时，显式加入 intent.references 并写 purpose，资料变化后 save/refresh。把方法当创作参考；只有违反作者明确采用的硬约束或真实连续性矛盾才阻塞，不将风格建议伪装为不合格。外部作品机制分析转 specwriter-analyze，近期市场问题转 specwriter-research。
+
+方法用于本书实际计划、审阅或旧章修改时，按 [生命周期核查](references/lifecycle.md) 完成 plan/review/impact 核查，核对正式原文与已采用约定再保存实际判断，不只准备资料。既有有效证据优先复用，有缺口才检索；空历史不调用 GraphRAG。方法模板不替代历史事实或作者选择。

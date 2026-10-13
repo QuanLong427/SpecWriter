@@ -16,3 +16,9 @@ description: 审阅 SpecWriter 章节或剧情段的连续性、创作约定与�
 按 review-requirements 全部 intentChecks 核对指示/采纳反馈：require 需当前正文引用，avoid 需核对范围，资料齐全不代替语义判断。反馈取舍保存理由，草稿审阅不表示正式落实；人工 resolve 不证明正文修改。
 
 已选研究/题材方法按 [研究协议](references/research.md) 核对用途、来源范围与采用状态。references 只是参考，不能从一个 profile 自动推导硬约束；有依据的风格改法通常作 suggestion/warning。按作者选定的读者承诺与文风审阅，不统一要求固定爽点、甜虐比例或节奏。报告引文/hash通过不证明市场推断或机制判断成立，外部分析不代替本书正文证据。
+
+按 [生命周期核查](references/lifecycle.md) 选择实际目标。当前工作包草稿创建 `review-<work>-<chapter>` 的 stage=review 任务，绑定 work/chapter、非空草稿与有效 context，默认复用 context；新疑点才 --retrieve 或显式问题。独立审阅已接纳章节用无 work 的 `memory check prepare ID --stage review --chapter N` 或明确 from/to，查询到 to，实际读该范围原文与出处后保存判断；不创建修订工作包，不改正文，不参与写作门禁或 context。prepared 不是完成，uncertain/conflicting 保留真实结论；独立审阅允许报告这些问题，不因未授权修订而假报通过。
+
+当前草稿核查 completed/fresh 后再 verify；历史 evidence 只填正式章节的 chapter/revision/bodyHash/quote，未接纳草稿的核对写 conclusion/reviewNotes，另在本章 review.json 留当前引用，不假造正式 revision。已有核查仍须检查 fresh，正文变更后旧报告只是历史。空历史不调用 GraphRAG。
+
+工作包核查 save 完成后重新运行 review-requirements，核对 memoryChecks 并将 memoryCheckBindings 的实际 `{id,stage,revision}` 填入 review.memory_checks，再实际审阅并 verify。plan/review/impact 结论版本更新后须重审，不能只替换绑定让旧 review 借新包通过；旧无任务书仍兼容。独立正式审阅只保存生命周期报告，不假造工作包章审阅。

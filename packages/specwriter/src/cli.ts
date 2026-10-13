@@ -11,6 +11,7 @@ import { AuthorInstructions } from './author-guidance.js';
 import { ResearchLibrary } from './research.js';
 import { collectMarket } from './market-sources.js';
 import { craftProfile, craftProfiles, useCraftProfile } from './craft.js';
+import { MemoryLifecycle } from './memory-lifecycle.js';
 import { startReader } from './reader-server.js';
 import { spawn } from 'node:child_process';
 import { UsageLedger, validatePrices, type Prices } from './usage.js';
@@ -18,7 +19,7 @@ import { readJson } from './files.js';
 import { BookVersions } from './versions.js';
 import { runBenchmark, scoreBenchmark, type BenchmarkArm } from './benchmark.js';
 
-const help = `SpecWriter 0.10 — Codex fiction workflows + WriterMemory + research references
+const help = `SpecWriter 0.11 — Codex fiction workflows + lifecycle memory checks
 
 Usage: specwriter <command> [arguments] [--root PATH] [--json]
 
@@ -124,9 +125,23 @@ Usage: specwriter <command> [arguments] [--root PATH] [--json]
                                 Capture public ranking samples; report unavailable data explicitly
   craft list|show [PROFILE]      Inspect original genre writing methods, without model calls
   craft use PROFILE --as ID      Record a craft reference; author chooses which rules to adopt
+  memory check prepare ID --stage plan|review|impact|recap|finish
+                [--work ID --chapter N --from N --to N --question TEXT]
+                [--questions-file FILE --budget CHARS --refresh --retrieve]
+                                Prepare version-bound historical checks, reusing available retrieval
+  memory check show ID [--draft] Inspect the prepared draft or recorded checks
+  memory check save ID           Validate exact sources and record actual review decisions
+  memory check list              List pending, completed or stale memory checks
+  memory check status ID         Inspect readiness of one memory check
+  recap prepare ID --from N --to N [--question TEXT --questions-file FILE --refresh]
+  recap show ID [--draft] | save ID | list
+                                Review a completed story segment with canonical evidence
+  finish prepare ID [--question TEXT --questions-file FILE --refresh]
+  finish show ID [--draft] | save ID | list | status
+  finish accept ID --reason TEXT Record the author's completion decision after whole-book checks
 
 Codex: $specwriter (entry) + explore / propose / write / review / revise / commit / archive
-       + $specwriter-research / analyze / craft for external evidence and writing methods
+       + $specwriter-research / analyze / craft / recap / finish
 Codex writes prose, extraction and review artifacts. Default prepare/query use Microsoft
 GraphRAG and call configured models for nonempty corpora; explicit local mode uses no model.
 `;
@@ -143,7 +158,7 @@ function sourceText(path: string): string {
 function parseArguments(values: string[]): Arguments {
   const positional: string[] = [];
   const flags = new Map<string, string | boolean>();
-  const booleans = new Set(['json', 'help', 'refresh', 'capture', 'draft', 'no-open', 'reopen', 'rebuild', 'dry-run', 'reconfigure', 'models', 'probe']);
+  const booleans = new Set(['json', 'help', 'refresh', 'capture', 'draft', 'no-open', 'reopen', 'rebuild', 'dry-run', 'reconfigure', 'models', 'probe', 'retrieve']);
   for (let index = 0; index < values.length; index++) {
     const value = values[index]!;
     if (!value.startsWith('--')) { positional.push(value); continue; }
@@ -165,13 +180,13 @@ async function main(): Promise<void> {
   const allowed: Record<string, string[]> = {
     init: ['name', 'backend'], status: [], propose: ['title', 'from', 'to'], prepare: ['work', 'query', 'budget', 'refresh'],
     resume: ['work'], contract: ['from', 'reason'], work: ['from', 'to', 'acceptance', 'reason'], intent: ['work'],
-    hash: ['work'], verify: ['work'], commit: ['work'], memory: ['at', 'holder', 'limit', 'hops', 'python', 'model', 'embedding', 'env-file', 'credentials', 'provider', 'embedding-base', 'embedding-dimensions', 'reconfigure', 'preset', 'probe', 'method', 'backend', 'auto-index', 'retain', 'keep', 'rebuild', 'dry-run', 'prices', 'max-requests', 'max-tokens', 'max-cost', 'unknown-usage'], history: [], archive: [], sync: ['capture'], doctor: ['models', 'probe'],
+    hash: ['work'], verify: ['work'], commit: ['work'], memory: ['at', 'holder', 'limit', 'hops', 'python', 'model', 'embedding', 'env-file', 'credentials', 'provider', 'embedding-base', 'embedding-dimensions', 'reconfigure', 'preset', 'probe', 'method', 'backend', 'auto-index', 'retain', 'keep', 'rebuild', 'dry-run', 'prices', 'max-requests', 'max-tokens', 'max-cost', 'unknown-usage', 'stage', 'work', 'chapter', 'from', 'to', 'question', 'questions-file', 'budget', 'refresh', 'draft', 'retrieve'], history: [], archive: [], sync: ['capture'], doctor: ['models', 'probe'],
     'review-requirements': ['work'], version: ['message', 'to', 'bundle', 'out'],
     benchmark: ['mode', 'dataset', 'out', 'provider', 'max-operations', 'arms', 'budget', 'method', 'run', 'ratings', 'prices'],
     read: ['draft', 'work', 'port', 'no-open'], export: ['format'], feedback: ['chapter', 'work', 'reopen', 'decision', 'reason', 'anchor'],
     instruction: ['chapter', 'work', 'text', 'kind', 'from', 'to', 'reason'],
     research: ['kind', 'title', 'question', 'platform', 'audience', 'window', 'source', 'file', 'url', 'published-at', 'limit', 'timeout', 'draft'],
-    craft: ['as']
+    craft: ['as'], recap: ['from', 'to', 'question', 'questions-file', 'refresh', 'draft'], finish: ['question', 'questions-file', 'refresh', 'draft', 'reason']
   };
   if (!allowed[command]) throw new Error(`Unknown command: ${command}`);
   for (const flag of args.flags.keys()) if (!['root', 'json', ...allowed[command]!].includes(flag)) throw new Error(`Unsupported option --${flag} for ${command}`);
@@ -187,6 +202,14 @@ async function main(): Promise<void> {
     return value;
   };
   const count = (max: number): void => { if (args.positional.length > max) throw new Error('Too many positional arguments'); };
+  const questions = (): string[] | undefined => {
+    const text = option('question'), path = option('questions-file');
+    if (text !== undefined && path !== undefined) throw new Error('Use --question or --questions-file, not both');
+    const value: unknown = path === undefined ? text === undefined ? undefined : [text] : JSON.parse(sourceText(path));
+    if (value !== undefined && (!Array.isArray(value) || value.length < 1 || value.length > 8 || value.some(item => typeof item !== 'string' || !item.trim() || item.length > 2000))) throw new Error('Memory questions must be 1..8 nonempty strings of at most 2000 characters');
+    return value as string[] | undefined;
+  };
+  const optionalNumber = (name: string) => option(name) === undefined ? undefined : positiveInteger(option(name), name);
   const print = (value: unknown): void => { process.stdout.write(JSON.stringify(value, null, 2) + '\n'); };
   if (command === 'craft' && args.positional[0] !== 'use') {
     const action = position(0, 'craft action'); count(action === 'list' ? 1 : 2);
@@ -301,6 +324,29 @@ async function main(): Promise<void> {
         print(project.store.transaction(() => useCraftProfile(new ResearchLibrary(project.root), position(1, 'profile'), option('as', true)!)));
         break;
       }
+      case 'recap':
+      case 'finish': {
+        const audits = project.audits, action = position(0, `${command} action`);
+        const allowedActions: Record<string, string[]> = { prepare: command === 'recap' ? ['from', 'to', 'question', 'questions-file', 'refresh'] : ['question', 'questions-file', 'refresh'],
+          show: ['draft'], save: [], list: [], ...(command === 'finish' ? { accept: ['reason'], status: [] } : {}) };
+        if (!allowedActions[action]) throw new Error(`Unknown ${command} action`);
+        for (const flag of args.flags.keys()) if (!['root', 'json', ...allowedActions[action]!].includes(flag)) throw new Error(`Unsupported option --${flag} for ${command} ${action}`);
+        count(['list', 'status'].includes(action) ? 1 : 2);
+        if (action === 'list') { print(audits.list(command)); break; }
+        if (action === 'status') { print(audits.status()); break; }
+        const id = identifier(position(1, 'audit id'));
+        if (action !== 'prepare') {
+          const kind = action === 'save' || (action === 'show' && args.flags.has('draft')) ? audits.draft(id).kind : audits.show(id).kind;
+          if (kind !== command) throw new Error(`This report belongs to ${kind}, not ${command}`);
+        }
+        if (action === 'prepare') {
+          if (command === 'recap' && (option('from') === undefined || option('to') === undefined)) throw new Error('Recap prepare requires --from and --to');
+          print(await audits.prepare(id, { kind: command, from: optionalNumber('from'), to: optionalNumber('to'), questions: questions(), refresh: args.flags.has('refresh'), signal: controller.signal }));
+        } else if (action === 'show') print(args.flags.has('draft') ? { draftPath: safePath(project.root, 'specwriter', 'story-audits', id, 'draft.json'), report: audits.draft(id) } : audits.show(id));
+        else if (action === 'save') print(audits.save(id));
+        else print(audits.accept(id, option('reason', true)!));
+        break;
+      }
       case 'status': count(0); print(project.status()); break;
       case 'resume': count(0); print(project.resume(option('work'))); break;
       case 'contract': {
@@ -324,7 +370,20 @@ async function main(): Promise<void> {
         if (!['seed', 'save', 'show'].includes(action)) throw new Error('Intent action must be seed, save or show');
         print(action === 'seed' ? project.workflow.seed(chapter, work) : action === 'save' ? project.workflow.saveIntent(chapter, work) : project.workflow.readIntent(chapter, work)); break;
       }
-      case 'propose': count(1); print(project.propose(position(0, 'work id'), option('title', true)!, positiveInteger(option('from', true), 'from'), positiveInteger(option('to', true), 'to'))); break;
+      case 'propose': {
+        count(1);
+        const work = project.propose(position(0, 'work id'), option('title', true)!, positiveInteger(option('from', true), 'from'), positiveInteger(option('to', true), 'to'));
+        const taskId = (stage: string) => { const id = `${stage}-${work.id}`; return id.length <= 64 ? id : `${stage}-${work.id.slice(0, 42)}-${hash(work.id).slice(0, 10)}`; };
+        const lifecycle = project.lifecycle;
+        const revising = project.store.revisions().some(revision => revision.chapter >= work.fromChapter && revision.chapter <= work.toChapter);
+        lifecycle.register(taskId('plan'), { stage: 'plan', workId: work.id });
+        if (revising) lifecycle.register(taskId('impact'), { stage: 'impact', workId: work.id });
+        const plan = await lifecycle.prepare(taskId('plan'), { stage: 'plan', workId: work.id, signal: controller.signal });
+        const impact = revising
+          ? await lifecycle.prepare(taskId('impact'), { stage: 'impact', workId: work.id, signal: controller.signal }) : null;
+        print({ ...work, memoryChecks: { plan, impact }, nextAction: 'Read the memory check drafts, record actual decisions and save them before advancing. Work creation grants no writing or acceptance authorization.' });
+        break;
+      }
       case 'prepare': count(1); print(await new WriterMemory(project).prepare(positiveInteger(position(0, 'chapter'), 'chapter'), option('work', true)!, { ...memoryOptions, query: option('query'), budget: option('budget') === undefined ? undefined : positiveInteger(option('budget'), 'budget'), refresh: args.flags.has('refresh') })); break;
       case 'hash': count(1); print(project.hashes(positiveInteger(position(0, 'chapter'), 'chapter'), option('work', true)!)); break;
       case 'review-requirements': count(1); print(project.reviewRequirements(positiveInteger(position(0, 'chapter'), 'chapter'), option('work', true)!)); break;
@@ -411,7 +470,7 @@ async function main(): Promise<void> {
       case 'memory': {
         const subcommand = position(0, 'memory subcommand');
         if (option('prices') && !['usage', 'budget'].includes(subcommand)) throw new Error('--prices applies only to memory usage/budget');
-        const memoryFlags: Record<string, string[]> = { show: ['at'], usage: ['prices'], budget: ['prices', 'max-requests', 'max-tokens', 'max-cost', 'unknown-usage'], rebuild: [], graph: ['at', 'holder'], configure: ['backend', 'method', 'auto-index', 'retain'], query: ['at', 'holder', 'limit', 'hops', 'backend', 'method'] };
+        const memoryFlags: Record<string, string[]> = { show: ['at'], usage: ['prices'], budget: ['prices', 'max-requests', 'max-tokens', 'max-cost', 'unknown-usage'], rebuild: [], graph: ['at', 'holder'], configure: ['backend', 'method', 'auto-index', 'retain'], query: ['at', 'holder', 'limit', 'hops', 'backend', 'method'], check: ['stage', 'work', 'chapter', 'from', 'to', 'question', 'questions-file', 'budget', 'refresh', 'draft', 'retrieve'] };
         if (subcommand !== 'graphrag') {
           if (!memoryFlags[subcommand]) throw new Error('Unknown memory subcommand');
           for (const flag of args.flags.keys()) if (!['root', 'json', ...memoryFlags[subcommand]!].includes(flag)) throw new Error(`Unsupported option --${flag} for memory ${subcommand}`);
@@ -421,7 +480,21 @@ async function main(): Promise<void> {
           at = Number(option('at'));
           if (!Number.isSafeInteger(at) || at < 0) throw new Error('at must be a nonnegative integer');
         }
-        if (subcommand === 'show') { count(1); print(project.memory(at)); }
+        if (subcommand === 'check') {
+          const lifecycle = project.lifecycle, action = position(1, 'check action');
+          const checkFlags: Record<string, string[]> = { prepare: ['stage', 'work', 'chapter', 'from', 'to', 'question', 'questions-file', 'budget', 'refresh', 'retrieve'], show: ['draft'], save: [], list: [], status: [] };
+          if (!checkFlags[action]) throw new Error('Memory check action must be prepare, show, save, list or status');
+          for (const flag of args.flags.keys()) if (!['root', 'json', ...checkFlags[action]!].includes(flag)) throw new Error(`Unsupported option --${flag} for memory check ${action}`);
+          count(action === 'list' ? 2 : 3);
+          if (action === 'list') { print(lifecycle.list()); break; }
+          const id = identifier(position(2, 'check id'));
+          if (action === 'prepare') print(await lifecycle.prepare(id, { stage: option('stage', true)! as NonNullable<Parameters<MemoryLifecycle['prepare']>[1]>['stage'], workId: option('work'), chapter: optionalNumber('chapter'),
+            from: optionalNumber('from'), to: optionalNumber('to'), questions: questions(), budget: optionalNumber('budget'), refresh: args.flags.has('refresh'), retrieve: args.flags.has('retrieve'), signal: controller.signal }));
+          else if (action === 'show') print(args.flags.has('draft') ? { draftPath: safePath(project.root, 'specwriter', 'memory', 'tasks', id, 'draft.json'), report: lifecycle.draft(id) } : lifecycle.show(id));
+          else if (action === 'save') print(lifecycle.save(id));
+          else print(lifecycle.ready(id));
+        }
+        else if (subcommand === 'show') { count(1); print(project.memory(at)); }
         else if (subcommand === 'usage') {
           count(1);
           print(new UsageLedger(project.root).report(prices()));

@@ -8,3 +8,5 @@ description: 在 SpecWriter 小说项目中探索题材、人物、冲突和卡�
 围绕作者的目标讨论少量有区别的方向，说明它们如何影响长期张力和读者体验。对已写剧情先核查来源。将需要保留的讨论写到相关工作包 proposal 的探索部分，或新建 `specwriter/plans/exploration.md`；清楚标记待决内容。用户已经选定的方向可整理成明确约定，仍不写入故事事实记忆。
 
 需要近期市场证据转 specwriter-research；需要分析可访问作品转 specwriter-analyze；需要题材机制参考转 specwriter-craft。按需读 [研究协议](references/research.md)，已有研究用 research show 核对来源与范围。普通构思无需强制调研，资料只提供选项；作者选定才由 propose 整理 Specs，不把热榜位置或原创经验当成功保证。
+
+涉及本书既有剧情或下一阶段方向时，按 [生命周期核查](references/lifecycle.md) 完成 plan 历史检查：复用有效正文出处，有证据缺口才检索，实际填写并保存核查判断。新书没有历史时明确记录，不调用 GraphRAG；纯外部创意讨论不强行变成历史审计。

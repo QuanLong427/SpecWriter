@@ -2,6 +2,8 @@
 
 Microsoft GraphRAG 是默认检索后端。WriterMemory 继续管理正式事实、状态、认知、章节和版本。只有显式选择 `memory.backend: local` 才使用离线检索；配置或模型调用失败不会静默切换。
 
+计划、独立审阅、修订影响、阶段回顾与完结通过 [生命周期历史核查](lifecycle.md) 共用正式出处、版本与查询资料。新书空历史不调用 GraphRAG，已有有效结果先复用，有证据缺口才查。prepare 资料不等于实际完成核查；任务报告不新增 canon，review/impact 后文材料与目标章 context 分开。正文仍按下方证据协议提取、审阅和接纳。
+
 ## 记录什么
 
 记忆从已接纳正文重放，候选提取放在 memory-delta.json。每条新增记录必须有当前草稿中逐字连续的 evidence.quote。引用存在由 CLI 检查，引用是否支持所提事实由 Codex 审阅。没有数字、因果或身份依据时留空，不能猜测补全。

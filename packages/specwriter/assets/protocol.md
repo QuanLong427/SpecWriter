@@ -20,11 +20,25 @@
 
 用户可以使用自然语言。普通写作按“准备→写作→提取→审阅”执行，作者无需逐个调用内部命令。用户要求接纳正文，或已经明确授权当前范围的自动接纳时提交，不重复征求授权；否则完成可审阅草稿。文学质量建议通常是 warning/suggestion，不机械判定失败；真实矛盾、违反明确硬约束可标 blocking，并提供依据。
 
+## 生命周期历史核查
+
+计划、独立审阅、修订影响、阶段回顾与完结分别使用 plan/review/impact/recap/finish，完整步骤和模板职责见 [生命周期核查](lifecycle.md)。先复用当前有效正文、记忆和出处，有证据缺口才检索；空历史不调用 GraphRAG。资料 prepared 不表示检查已完成，Codex 须读原文、填写实际 findings/reviewNotes 并 save。
+
+CLI propose 自动准备 plan-<work>，旧章另准备 impact-<work>；review Skill 为当前草稿创建 review-<work>-<chapter> 并在 verify 前完成。已创建 pending、不完整或 stale 任务阻止相关推进，旧工作包无任务保持兼容；不能删任务绕门禁。保存 uncertain/conflicting 判断仍 completed=false。计划核查只使用正确前缀，可进入 context；review/impact 独立，后文影响材料不进入目标章续写。
+
+memory check save 后重新取 review-requirements 的 memoryChecks 与 memoryCheckBindings，将本章有关 plan/review/impact 的实际 `{id,stage,revision}` 写到 review.memory_checks，完成章审阅再 verify/commit。已完成核查结论更新后重新审阅，旧 review 不得借新的包通过，不能只替换哈希/绑定。独立正式正文 review 不创建 work、不参与这些门禁，也不入 context；其问题报告不授权修订。
+
+recap/finish prepare 自动准备同 ID 生命周期任务，先完成该任务再实际填写 story-audits 报告。回顾范围是已接纳段落，finish 是当前全有效正文；引用来自正式版本，机器伏笔清单不改。明确作者保留的开放承诺可记录，不强制所有作品同一结局；报告不修改 canon、约定或授权。
+
+finish save 是检查报告，finish accept 才依据真实作者指令记录当前版本完成。只要求检查不得接受完结，已有明确指令无需重复确认。完成记录动态校验正文、范围及相关输入，旧版本不能复用为当前证明；历史仍保存。准备、引用校验与记录都不证明文学质量或百万字质量。
+
 ## 文档职责
 
 - `specwriter/specs/{premise,world,characters,style}.md`：创作约定，区分硬约束、创作目标和开放空间。模板初始为草案；根据作者意见明确采用的内容，保留待决问题。
 - `specwriter/plans/outline.md`、`volumes/*.md`：全书方向和滚动展开的卷计划，禁止作为已发生事件的证据。
 - `specwriter/research/<id>/draft.json`：市场、作品分析或方法报告草案；save 后以不可变版本与 current.json 保存，来源位于 sources/。观察、推断和作者选项分别记录，不自动采用 Specs 或入事实记忆。细节见 [研究协议](research.md)。
+- `specwriter/memory/tasks/<id>/`：生命周期历史核查请求、资料准备、实际判断草案及不可变已保存版本；不等于正文事实或作者授权。
+- `specwriter/story-audits/<id>/`：阶段回顾/全书检查的准备与实际审阅报告，引用正式正文；完结接受另保存版本绑定证明。
 - `specwriter/work/<id>/proposal.md`：这轮作者意图、范围、必须保留和避免、创作约定变更、回顾。
 - `instruction add/list/retire` 保存有章节/工作包范围的具体指示，见 [创作流程](workflow.md)。授权理由不代替创作指示。
 - `tasks.md`：自动生成进度，额外的作者待办写在 proposal 中。
@@ -85,6 +99,8 @@ memory-delta 中每条事件、状态变化、关系、伏笔、新人物和事�
 直接编辑正式章节后，`sync --capture` 先保存所有修改到 `manuscript/drafts/imported/`，再恢复数据库中的已接纳正文。将导入稿复制到新工作包的草稿，重新提取和审阅后接纳。普通 sync 不覆盖未接纳的直接编辑。
 
 archive 只关闭工作包并保存文档/版本清单；不会把未写出的计划写入 Memory。未完成的章节不能归档。
+
+回顾与完结不会替代正文接纳：recap 不关闭工作包，finish accept 不接纳草稿或自动修改伏笔。历史核查与报告的旧版保留但需检查 fresh/completed；目标章资料不包含 review/impact，避免后文污染或审阅自我失效。
 
 按 review-requirements.intentChecks 的当前清单填写 intent_checks，包含章纲检查与适用指示/采纳反馈。require 需当前正文引用，avoid 需实际核对说明；变化后刷新重审，不只替换哈希。指示不是事实。见 workflow.md。contract adopt 固定版本，work authorize 控制范围/接纳模式，resume 无模型恢复实际任务。
 
